@@ -2,7 +2,10 @@
 
 #include <optional>
 
+#include "desktop_multi_window/desktop_multi_window_plugin.h"
 #include "flutter/generated_plugin_registrant.h"
+#include "screen_retriever_windows/screen_retriever_windows_plugin_c_api.h"
+#include "window_manager/window_manager_plugin.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +28,20 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  DesktopMultiWindowSetWindowCreatedCallback([](void* controller) {
+    auto* flutter_view_controller =
+        reinterpret_cast<flutter::FlutterViewController*>(controller);
+    auto* registry = flutter_view_controller->engine();
+    // Child windows must not register tray_manager. The tray belongs to the
+    // primary process window; registering it in child engines can steal tray
+    // menu events from the controller that handles Report/Settings/Exit.
+    DesktopMultiWindowPluginRegisterWithRegistrar(
+        registry->GetRegistrarForPlugin("DesktopMultiWindowPlugin"));
+    ScreenRetrieverWindowsPluginCApiRegisterWithRegistrar(
+        registry->GetRegistrarForPlugin("ScreenRetrieverWindowsPluginCApi"));
+    WindowManagerPluginRegisterWithRegistrar(
+        registry->GetRegistrarForPlugin("WindowManagerPlugin"));
+  });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

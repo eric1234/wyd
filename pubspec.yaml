@@ -1,5 +1,5 @@
 name: wyd
-description: "A new Flutter project."
+description: "What's ya doin? A tray-based desktop time tracker."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -34,9 +34,18 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  sqflite_common_ffi: ^2.4.0+3
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  synchronized: ^3.4.0+1
+  window_manager: ^0.5.1
+  tray_manager: ^0.5.2
+  desktop_multi_window: ^0.3.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
@@ -45,6 +54,11 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -56,6 +70,12 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/app_icon.png
+    - assets/tray_icon.png
+    - assets/tray_icon.ico
+    - assets/tray_icon_template.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

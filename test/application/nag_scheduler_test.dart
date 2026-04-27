@@ -1,0 +1,280 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:wyd/src/application/application.dart';
+import 'package:wyd/src/domain/domain.dart';
+
+void main() {
+  group('NagScheduler', () {
+    test('does not schedule while idle', () {
+      final harness = _Harness();
+
+      harness.scheduler.update(harness.snapshot(activeTask: null));
+
+      expect(harness.timers.activeTimers, isEmpty);
+    });
+
+    test('schedules reminder from last confirmation while tracking', () {
+      final harness = _Harness();
+      final lastConfirmationAt = DateTime.utc(2026, 1, 1, 9);
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 5);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 8)),
+          runtimeState: RuntimeState(lastConfirmationAtUtc: lastConfirmationAt),
+        ),
+      );
+
+      expect(
+        harness.timers.activeTimers.single.duration,
+        const Duration(minutes: 10),
+      );
+    });
+
+    test(
+      'shows prompt when reminder becomes due and schedules timeout',
+      () async {
+        final harness = _Harness();
+        final shownAt = DateTime.utc(2026, 1, 1, 9, 15);
+        harness.clock.current = shownAt;
+        harness.onShowPrompt = () async {
+          return harness.snapshot(
+            activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+            runtimeState: RuntimeState(
+              promptState: PromptState.visible(shownAt),
+            ),
+          );
+        };
+
+        harness.scheduler.update(
+          harness.snapshot(
+            activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+            runtimeState: RuntimeState(
+              lastConfirmationAtUtc: DateTime.utc(2026, 1, 1, 9),
+            ),
+          ),
+        );
+        await harness.timers.fireFirst();
+
+        expect(harness.showPromptCalls, 1);
+        expect(
+          harness.timers.activeTimers.single.duration,
+          const Duration(minutes: 1),
+        );
+      },
+    );
+
+    test('defers due reminder when supported typing is recent', () async {
+      final harness = _Harness(
+        typingDetector: _FakeTypingActivityDetector(
+          lastTypingAt: DateTime.utc(2026, 1, 1, 9, 15),
+        ),
+      );
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          capabilities: const PlatformCapabilities(
+            supportsTypingActivity: true,
+          ),
+        ),
+      );
+      await harness.timers.fireFirst();
+
+      expect(harness.showPromptCalls, 0);
+      expect(
+        harness.timers.activeTimers.single.duration,
+        const Duration(seconds: 5),
+      );
+    });
+
+    test(
+      'does not defer reminder when typing capability is unsupported',
+      () async {
+        final harness = _Harness(
+          typingDetector: _FakeTypingActivityDetector(
+            lastTypingAt: DateTime.utc(2026, 1, 1, 9, 15),
+          ),
+        );
+        harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+
+        harness.scheduler.update(
+          harness.snapshot(
+            activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          ),
+        );
+        await harness.timers.fireFirst();
+
+        expect(harness.showPromptCalls, 1);
+      },
+    );
+
+    test(
+      'timeout callback transitions expired prompt to idle scheduling',
+      () async {
+        final harness = _Harness();
+        final shownAt = DateTime.utc(2026, 1, 1, 9, 15);
+        harness.clock.current = DateTime.utc(2026, 1, 1, 9, 16);
+        harness.onPromptTimedOut = () async {
+          return harness.snapshot(
+            activeTask: null,
+            runtimeState: RuntimeState(
+              promptState: PromptState.expired(shownAt),
+            ),
+          );
+        };
+
+        harness.scheduler.update(
+          harness.snapshot(
+            activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+            runtimeState: RuntimeState(
+              promptState: PromptState.visible(shownAt),
+            ),
+          ),
+        );
+        await harness.timers.fireFirst();
+
+        expect(harness.timeoutCalls, 1);
+        expect(harness.timers.activeTimers, isEmpty);
+      },
+    );
+
+    test('updating to idle cancels an existing reminder', () {
+      final harness = _Harness();
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+        ),
+      );
+
+      harness.scheduler.update(harness.snapshot(activeTask: null));
+
+      expect(harness.timers.timers.single.isActive, isFalse);
+      expect(harness.timers.activeTimers, isEmpty);
+    });
+  });
+}
+
+final class _Harness {
+  _Harness({TypingActivityDetector? typingDetector})
+    : clock = _FakeClock(DateTime.utc(2026, 1, 1, 9, 15)),
+      timers = _FakeSchedulerTimerFactory() {
+    scheduler = NagScheduler(
+      clock: clock,
+      timerFactory: timers,
+      typingActivityDetector:
+          typingDetector ?? const UnsupportedTypingActivityDetector(),
+      onShowPrompt: () {
+        showPromptCalls += 1;
+        return onShowPrompt();
+      },
+      onPromptTimedOut: () {
+        timeoutCalls += 1;
+        return onPromptTimedOut();
+      },
+    );
+  }
+
+  final _FakeClock clock;
+  final _FakeSchedulerTimerFactory timers;
+  late final NagScheduler scheduler;
+  int showPromptCalls = 0;
+  int timeoutCalls = 0;
+  late Future<AppStateSnapshot> Function() onShowPrompt = () async {
+    return snapshot(
+      activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+      runtimeState: RuntimeState(
+        promptState: PromptState.visible(clock.current),
+      ),
+    );
+  };
+  late Future<AppStateSnapshot> Function() onPromptTimedOut = () async {
+    return snapshot(activeTask: null);
+  };
+
+  AppStateSnapshot snapshot({
+    required ActiveTask? activeTask,
+    RuntimeState? runtimeState,
+    AppSettings settings = AppSettings.defaults,
+    PlatformCapabilities capabilities = const PlatformCapabilities(),
+  }) {
+    return AppStateSnapshot(
+      activeTask: activeTask,
+      runtimeState:
+          runtimeState ?? RuntimeState(lastConfirmationAtUtc: clock.current),
+      settings: settings,
+      capabilities: capabilities,
+    );
+  }
+}
+
+ActiveTask _activeTask({required DateTime startedAtUtc}) {
+  return ActiveTask(
+    taskText: 'Write docs',
+    taskTextNormalized: 'write docs',
+    startedAtUtc: startedAtUtc,
+    sourceEventId: 1,
+  );
+}
+
+final class _FakeClock implements Clock {
+  _FakeClock(this.current);
+
+  DateTime current;
+
+  @override
+  DateTime nowUtc() => current;
+}
+
+final class _FakeTypingActivityDetector implements TypingActivityDetector {
+  const _FakeTypingActivityDetector({this.lastTypingAt});
+
+  final DateTime? lastTypingAt;
+
+  @override
+  Future<DateTime?> lastTypingActivityUtc() async => lastTypingAt;
+}
+
+final class _FakeSchedulerTimerFactory implements SchedulerTimerFactory {
+  final List<_FakeSchedulerTimer> timers = [];
+
+  List<_FakeSchedulerTimer> get activeTimers {
+    return timers.where((timer) => timer.isActive).toList();
+  }
+
+  @override
+  SchedulerTimer schedule(Duration duration, void Function() callback) {
+    final timer = _FakeSchedulerTimer(duration, callback);
+    timers.add(timer);
+    return timer;
+  }
+
+  Future<void> fireFirst() async {
+    activeTimers.first.fire();
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
+final class _FakeSchedulerTimer implements SchedulerTimer {
+  _FakeSchedulerTimer(this.duration, this._callback);
+
+  final Duration duration;
+  final void Function() _callback;
+  bool _active = true;
+
+  @override
+  bool get isActive => _active;
+
+  @override
+  void cancel() {
+    _active = false;
+  }
+
+  void fire() {
+    if (!_active) {
+      return;
+    }
+    _active = false;
+    _callback();
+  }
+}

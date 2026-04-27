@@ -5,25 +5,48 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include <desktop_multi_window/desktop_multi_window_plugin.h>
+#include <screen_retriever_linux/screen_retriever_linux_plugin.h>
+#include <window_manager/window_manager_plugin.h>
+
 #include "flutter/generated_plugin_registrant.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* single_instance_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
-// Called when first Flutter frame received.
-static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
-}
-
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  if (gtk_application_get_windows(GTK_APPLICATION(application)) != nullptr) {
+    if (self->single_instance_channel != nullptr) {
+      fl_method_channel_invoke_method(self->single_instance_channel,
+                                      "secondInstanceActivated", nullptr,
+                                      nullptr, nullptr, nullptr);
+    }
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+
+  // Use the bundled logo for Linux window switchers and docks.
+  g_autofree gchar* executable_path =
+      g_file_read_link("/proc/self/exe", nullptr);
+  if (executable_path != nullptr) {
+    g_autofree gchar* executable_dir = g_path_get_dirname(executable_path);
+    g_autofree gchar* icon_path =
+        g_build_filename(executable_dir, "data", "flutter_assets", "assets",
+                         "app_icon.png", nullptr);
+    if (g_file_test(icon_path, G_FILE_TEST_EXISTS)) {
+      (void)gtk_window_set_icon_from_file(window, icon_path, nullptr);
+    }
+  }
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -52,7 +75,9 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "wyd");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // This app is tray-first, so its first visible window is usually the compact
+  // quick-entry popup. Dart-side role configuration resizes report/settings.
+  gtk_window_set_default_size(window, 420, 304);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -67,13 +92,38 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
 
-  // Show the window when Flutter renders.
-  // Requires the view to be realized so we can start rendering.
-  g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
-                           self);
+  // Keep the GTK window hidden at startup. Dart-side window coordination will
+  // explicitly show role windows after tray/menu actions.
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  desktop_multi_window_plugin_set_window_created_callback(
+      [](FlPluginRegistry* registry) {
+        // Child windows must not register tray_manager. The tray belongs to the
+        // primary process window; registering it in child engines can steal tray
+        // menu events from the controller that handles Report/Settings/Exit.
+        g_autoptr(FlPluginRegistrar) desktop_multi_window_registrar =
+            fl_plugin_registry_get_registrar_for_plugin(
+                registry, "DesktopMultiWindowPlugin");
+        desktop_multi_window_plugin_register_with_registrar(
+            desktop_multi_window_registrar);
+
+        g_autoptr(FlPluginRegistrar) screen_retriever_registrar =
+            fl_plugin_registry_get_registrar_for_plugin(
+                registry, "ScreenRetrieverLinuxPlugin");
+        screen_retriever_linux_plugin_register_with_registrar(
+            screen_retriever_registrar);
+
+        g_autoptr(FlPluginRegistrar) window_manager_registrar =
+            fl_plugin_registry_get_registrar_for_plugin(
+                registry, "WindowManagerPlugin");
+        window_manager_plugin_register_with_registrar(window_manager_registrar);
+      });
+
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->single_instance_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "dev.wyd.tracker/single_instance", FL_METHOD_CODEC(codec));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -121,6 +171,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->single_instance_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
@@ -143,6 +194,7 @@ MyApplication* my_application_new() {
   g_set_prgname(APPLICATION_ID);
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
-                                     "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                      "application-id", APPLICATION_ID, "flags",
+                                      static_cast<GApplicationFlags>(0),
+                                      nullptr));
 }

@@ -112,6 +112,55 @@ void main() {
       ]);
     });
 
+    test('ignores future events', () {
+      final now = DateTime.utc(2026, 1, 10, 12);
+      final suggestions = AutocompleteEngine.suggestions(
+        events: [
+          ActivityLogEvent.startTask(
+            id: 1,
+            occurredAtUtc: now.add(const Duration(minutes: 1)),
+            taskText: 'Future task',
+          ),
+          ActivityLogEvent.switchTask(
+            id: 2,
+            occurredAtUtc: now.subtract(const Duration(minutes: 1)),
+            taskText: 'Current task',
+          ),
+        ],
+        query: 'task',
+        nowUtc: now,
+        lookbackDays: 3,
+      );
+
+      expect(suggestions.map((suggestion) => suggestion.taskText), [
+        'Current task',
+      ]);
+    });
+
+    test('uses id tie-breaker for most recent raw label', () {
+      final now = DateTime.utc(2026, 1, 10, 12);
+      final sameTime = now.subtract(const Duration(hours: 1));
+      final suggestions = AutocompleteEngine.suggestions(
+        events: [
+          ActivityLogEvent.switchTask(
+            id: 2,
+            occurredAtUtc: sameTime,
+            taskText: 'task   name',
+          ),
+          ActivityLogEvent.startTask(
+            id: 1,
+            occurredAtUtc: sameTime,
+            taskText: 'Task Name',
+          ),
+        ],
+        query: 'task',
+        nowUtc: now,
+        lookbackDays: 3,
+      );
+
+      expect(suggestions.single.taskText, 'task   name');
+    });
+
     test('limits results to five suggestions', () {
       final now = DateTime.utc(2026, 1, 10, 12);
       final events = List.generate(

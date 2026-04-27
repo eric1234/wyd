@@ -117,6 +117,37 @@ void main() {
       expect(report.rows.map((row) => row.taskText), ['Long', 'Short']);
     });
 
+    test('orders same-timestamp events by id when deriving segments', () {
+      final switchTime = DateTime.utc(2026, 1, 2, 10);
+      final report = ReportDeriver.buildDailyReport(
+        events: [
+          ActivityLogEvent.switchTask(
+            id: 3,
+            occurredAtUtc: switchTime,
+            taskText: 'Task B',
+          ),
+          ActivityLogEvent.startTask(
+            id: 1,
+            occurredAtUtc: DateTime.utc(2026, 1, 2, 9),
+            taskText: 'Task A',
+          ),
+          ActivityLogEvent.stopTask(
+            id: 2,
+            occurredAtUtc: switchTime,
+            source: ActivitySource.manualStop,
+          ),
+        ],
+        localDate: DateTime(2026, 1, 2),
+        nowUtc: DateTime.utc(2026, 1, 2, 11),
+      );
+
+      expect(report.rows.map((row) => row.taskText), ['Task A', 'Task B']);
+      expect(report.rows.map((row) => row.duration), [
+        const Duration(hours: 1),
+        const Duration(hours: 1),
+      ]);
+    });
+
     test('handles malformed sequences without failing', () {
       final report = ReportDeriver.buildDailyReport(
         events: [

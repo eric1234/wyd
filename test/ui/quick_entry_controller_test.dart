@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/domain/domain.dart';
@@ -111,11 +113,45 @@ void main() {
 
       expect(client.submittedTexts, ['Write docs']);
     });
+
+    test('ignores stale autocomplete responses after newer input', () async {
+      final client = _DelayedQuickEntryClient();
+      final controller = _controller(client);
+      await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+
+      final firstUpdate = controller.updateText('f');
+      await client.waitForRequests(1);
+      final secondUpdate = controller.updateText('fi');
+      await client.waitForRequests(2);
+
+      client.completeRequest(0, [_suggestion('Old result')]);
+      await firstUpdate;
+      expect(controller.state.suggestions, isEmpty);
+
+      client.completeRequest(1, [_suggestion('Fresh result')]);
+      await secondUpdate;
+      expect(controller.state.suggestions.single.taskText, 'Fresh result');
+    });
+
+    test('ignores stale autocomplete responses after close', () async {
+      final client = _DelayedQuickEntryClient();
+      final controller = _controller(client);
+      await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+
+      final update = controller.updateText('f');
+      await client.waitForRequests(1);
+      controller.close();
+      client.completeRequest(0, [_suggestion('Ignored result')]);
+      await update;
+
+      expect(controller.state.isOpen, isFalse);
+      expect(controller.state.suggestions, isEmpty);
+    });
   });
 }
 
 QuickEntryController _controller(
-  _FakeQuickEntryClient client, {
+  QuickEntryClient client, {
   Future<void> Function(AppStateSnapshot snapshot)? onSubmitted,
 }) {
   return QuickEntryController(
@@ -168,4 +204,44 @@ final class _FakeQuickEntryClient implements QuickEntryClient {
     submittedTexts.add(taskText);
     return _snapshot(activeTask: _activeTask(taskText));
   }
+}
+
+final class _DelayedQuickEntryClient implements QuickEntryClient {
+  final List<_SuggestionRequest> requests = [];
+  final List<String> submittedTexts = [];
+
+  @override
+  Future<List<AutocompleteSuggestion>> autocompleteSuggestions(String query) {
+    final request = _SuggestionRequest(query);
+    requests.add(request);
+    return request.completer.future;
+  }
+
+  @override
+  Future<AppStateSnapshot> submitTask(String taskText) async {
+    submittedTexts.add(taskText);
+    return _snapshot(activeTask: _activeTask(taskText));
+  }
+
+  Future<void> waitForRequests(int count) async {
+    for (
+      var attempt = 0;
+      attempt < 20 && requests.length < count;
+      attempt += 1
+    ) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(requests, hasLength(count));
+  }
+
+  void completeRequest(int index, List<AutocompleteSuggestion> suggestions) {
+    requests[index].completer.complete(suggestions);
+  }
+}
+
+final class _SuggestionRequest {
+  _SuggestionRequest(this.query);
+
+  final String query;
+  final Completer<List<AutocompleteSuggestion>> completer = Completer();
 }

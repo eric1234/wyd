@@ -31,6 +31,10 @@ final class SettingsService implements SettingsClient {
     final normalizedSettings = capabilities.supportsStartAtLogin
         ? settings
         : settings.copyWith(startAtLogin: false);
+    final issues = normalizedSettings.validate();
+    if (issues.isNotEmpty) {
+      throw AppSettingsValidationException(issues);
+    }
 
     if (capabilities.supportsStartAtLogin &&
         current.settings.startAtLogin != normalizedSettings.startAtLogin) {

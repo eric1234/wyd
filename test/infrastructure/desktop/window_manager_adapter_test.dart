@@ -12,18 +12,41 @@ void main() {
       'dev.leanflutter.plugins/screen_retriever',
     );
     late List<MethodCall> windowCalls;
+    late bool isFullScreen;
+    late bool isMaximized;
+    late bool isMinimized;
+    late bool isVisible;
+    late bool isPreventClose;
 
     setUp(() {
       windowCalls = [];
+      isFullScreen = false;
+      isMaximized = false;
+      isMinimized = false;
+      isVisible = false;
+      isPreventClose = false;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(windowManagerChannel, (call) async {
             windowCalls.add(call);
             return switch (call.method) {
-              'isFullScreen' ||
-              'isMaximized' ||
-              'isMinimized' ||
-              'isVisible' ||
-              'isPreventClose' => false,
+              'isFullScreen' => isFullScreen,
+              'isMaximized' => isMaximized,
+              'isMinimized' => isMinimized,
+              'isVisible' => isVisible,
+              'isPreventClose' => isPreventClose,
+              'setFullScreen' => isFullScreen = _boolArgument(
+                call.arguments,
+                'isFullScreen',
+              ),
+              'unmaximize' => isMaximized = false,
+              'restore' => isMinimized = false,
+              'show' => isVisible = true,
+              'hide' => isVisible = false,
+              'close' => isVisible = false,
+              'setPreventClose' => isPreventClose = _boolArgument(
+                call.arguments,
+                'isPreventClose',
+              ),
               'getBounds' => {
                 'x': 0.0,
                 'y': 0.0,
@@ -75,7 +98,165 @@ void main() {
       expect(showIndex, greaterThanOrEqualTo(0));
       expect(reportSizeIndex, lessThan(showIndex));
     });
+
+    test('applies quick-entry fixed-size window constraints', () async {
+      final adapter = SingleFlutterWindowAdapter();
+
+      await adapter.open(WindowRoleConfiguration.quickEntry());
+
+      expect(
+        windowCalls.any(
+          (call) =>
+              call.method == 'setAlwaysOnTop' &&
+              _boolArgument(call.arguments, 'isAlwaysOnTop'),
+        ),
+        isTrue,
+      );
+      expect(
+        windowCalls.any(
+          (call) =>
+              call.method == 'setSkipTaskbar' &&
+              _boolArgument(call.arguments, 'isSkipTaskbar'),
+        ),
+        isTrue,
+      );
+      expect(
+        windowCalls.any(
+          (call) =>
+              call.method == 'setResizable' &&
+              !_boolArgument(call.arguments, 'isResizable'),
+        ),
+        isTrue,
+      );
+      expect(
+        windowCalls.where((call) {
+          if (call.method != 'setBounds') {
+            return false;
+          }
+          final arguments = Map<Object?, Object?>.from(call.arguments as Map);
+          return arguments['width'] ==
+                  WindowRoleConfiguration.quickEntryWidth &&
+              arguments['height'] == WindowRoleConfiguration.quickEntryHeight;
+        }),
+        isNotEmpty,
+      );
+    });
+
+    test(
+      'normalizes fullscreen maximized and minimized states before sizing',
+      () async {
+        isFullScreen = true;
+        isMaximized = true;
+        isMinimized = true;
+        final adapter = SingleFlutterWindowAdapter();
+
+        await adapter.open(
+          WindowRoleConfiguration.forRole(WindowRole.settings),
+        );
+
+        expect(
+          windowCalls.any(
+            (call) =>
+                call.method == 'setFullScreen' &&
+                !_boolArgument(call.arguments, 'isFullScreen'),
+          ),
+          isTrue,
+        );
+        expect(windowCalls.any((call) => call.method == 'unmaximize'), isTrue);
+        expect(windowCalls.any((call) => call.method == 'restore'), isTrue);
+      },
+    );
+
+    test(
+      'native close hides and emits close request for current handle',
+      () async {
+        final adapter = SingleFlutterWindowAdapter();
+        final handle = await adapter.open(WindowRoleConfiguration.quickEntry());
+
+        final closeRequest = expectLater(
+          adapter.closeRequests,
+          emits(predicate<WindowHandle>((closed) => closed.id == handle.id)),
+        );
+        adapter.onWindowClose();
+        await closeRequest;
+
+        expect(windowCalls.any((call) => call.method == 'hide'), isTrue);
+      },
+    );
   });
+
+  group('HideOnCloseWindowHandler', () {
+    const windowManagerChannel = MethodChannel('window_manager');
+    late List<MethodCall> windowCalls;
+    late bool isPreventClose;
+
+    setUp(() {
+      windowCalls = [];
+      isPreventClose = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowManagerChannel, (call) async {
+            windowCalls.add(call);
+            return switch (call.method) {
+              'isPreventClose' => isPreventClose,
+              'setPreventClose' => isPreventClose = _boolArgument(
+                call.arguments,
+                'isPreventClose',
+              ),
+              _ => true,
+            };
+          });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowManagerChannel, null);
+    });
+
+    test('hides instead of closing and runs before-hide callback', () async {
+      var beforeHideCalls = 0;
+      final handler = HideOnCloseWindowHandler(
+        onBeforeHide: () async {
+          beforeHideCalls += 1;
+        },
+      );
+      await handler.initialize();
+
+      handler.onWindowClose();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(beforeHideCalls, 1);
+      expect(windowCalls.any((call) => call.method == 'hide'), isTrue);
+      expect(windowCalls.any((call) => call.method == 'close'), isFalse);
+    });
+
+    test('forceClose disables close interception and closes window', () async {
+      final handler = HideOnCloseWindowHandler();
+      await handler.initialize();
+
+      await handler.forceClose();
+
+      expect(
+        windowCalls.any(
+          (call) =>
+              call.method == 'setPreventClose' &&
+              !_boolArgument(call.arguments, 'isPreventClose'),
+        ),
+        isTrue,
+      );
+      expect(windowCalls.any((call) => call.method == 'close'), isTrue);
+    });
+  });
+}
+
+bool _boolArgument(Object? arguments, String key) {
+  if (arguments is bool) {
+    return arguments;
+  }
+  if (arguments is Map) {
+    return Map<Object?, Object?>.from(arguments)[key] as bool;
+  }
+  throw ArgumentError.value(arguments, 'arguments', 'Expected bool argument.');
 }
 
 Map<String, Object?> _display() {

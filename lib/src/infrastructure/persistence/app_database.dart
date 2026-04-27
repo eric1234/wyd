@@ -16,14 +16,20 @@ final class AppDatabase {
 
   static Future<AppDatabase> openDefault({
     DatabaseFactory? databaseFactory,
+    int schemaVersion = AppDatabase.schemaVersion,
   }) async {
     final path = await defaultDatabasePath();
-    return openAtPath(path, databaseFactory: databaseFactory);
+    return openAtPath(
+      path,
+      databaseFactory: databaseFactory,
+      schemaVersion: schemaVersion,
+    );
   }
 
   static Future<AppDatabase> openAtPath(
     String databasePath, {
     DatabaseFactory? databaseFactory,
+    int schemaVersion = AppDatabase.schemaVersion,
   }) async {
     _ensureFfiInitialized();
     final factory = databaseFactory ?? databaseFactoryFfi;
@@ -43,8 +49,13 @@ final class AppDatabase {
 
   static Future<AppDatabase> openInMemory({
     DatabaseFactory? databaseFactory,
+    int schemaVersion = AppDatabase.schemaVersion,
   }) async {
-    return openAtPath(inMemoryDatabasePath, databaseFactory: databaseFactory);
+    return openAtPath(
+      inMemoryDatabasePath,
+      databaseFactory: databaseFactory,
+      schemaVersion: schemaVersion,
+    );
   }
 
   static Future<String> defaultDatabasePath() async {

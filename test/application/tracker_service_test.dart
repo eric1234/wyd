@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/domain/domain.dart';
+import 'package:wyd/src/infrastructure/persistence/persistence.dart';
 
 void main() {
   group('TrackerService', () {
@@ -251,6 +253,157 @@ void main() {
         ActivityEventType.switchTask,
       ]);
     });
+
+    test('empty submit does not mutate persisted state', () async {
+      final harness = await _SqliteHarness.create();
+      addTearDown(harness.dispose);
+      final initialState = await harness.runtimeState.read();
+
+      await expectLater(
+        () => harness.service.submitTask(' \t\n '),
+        throwsA(isA<TaskTextValidationException>()),
+      );
+
+      expect(await harness.activityLog.allEvents(), isEmpty);
+      final state = await harness.runtimeState.read();
+      expect(state.lastConfirmationAtUtc, initialState.lastConfirmationAtUtc);
+      expect(state.promptState.status, initialState.promptState.status);
+      expect(state.cleanShutdown, initialState.cleanShutdown);
+    });
+
+    test(
+      'confirmation while prompt is visible clears pending prompt',
+      () async {
+        final harness = await _SqliteHarness.create();
+        addTearDown(harness.dispose);
+        await harness.service.submitTask('Write docs');
+        harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+        await harness.service.nagPromptShown();
+        harness.clock.current = DateTime.utc(2026, 1, 1, 9, 16);
+
+        final snapshot = await harness.service.submitTask('write   docs');
+
+        expect(snapshot.runtimeState.promptState.status, PromptStatus.none);
+        expect(
+          snapshot.runtimeState.lastConfirmationAtUtc,
+          harness.clock.current,
+        );
+        expect(await harness.activityLog.allEvents(), hasLength(1));
+      },
+    );
+
+    test('switch while prompt is visible clears pending prompt', () async {
+      final harness = await _SqliteHarness.create();
+      addTearDown(harness.dispose);
+      await harness.service.submitTask('Write docs');
+      await harness.service.nagPromptShown();
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 20);
+
+      final snapshot = await harness.service.submitTask('Fix bug');
+
+      expect(snapshot.activeTask!.taskText, 'Fix bug');
+      expect(snapshot.runtimeState.promptState.status, PromptStatus.none);
+      expect(
+        (await harness.activityLog.allEvents()).map((event) => event.eventType),
+        [ActivityEventType.startTask, ActivityEventType.switchTask],
+      );
+    });
+
+    test('nagPromptShown is a no-op while idle or already pending', () async {
+      final harness = await _SqliteHarness.create();
+      addTearDown(harness.dispose);
+
+      var snapshot = await harness.service.nagPromptShown();
+      expect(snapshot.runtimeState.promptState.status, PromptStatus.none);
+      expect(await harness.activityLog.allEvents(), isEmpty);
+
+      await harness.service.submitTask('Write docs');
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+      snapshot = await harness.service.nagPromptShown();
+      final shownAt = snapshot.runtimeState.promptState.shownAtUtc;
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 30);
+
+      snapshot = await harness.service.nagPromptShown();
+
+      expect(snapshot.runtimeState.promptState.status, PromptStatus.visible);
+      expect(snapshot.runtimeState.promptState.shownAtUtc, shownAt);
+    });
+
+    test(
+      'nagPromptTimedOut does not duplicate invalid timeout stops',
+      () async {
+        final harness = await _SqliteHarness.create();
+        addTearDown(harness.dispose);
+
+        var snapshot = await harness.service.nagPromptTimedOut();
+        expect(snapshot.runtimeState.promptState.status, PromptStatus.none);
+        expect(await harness.activityLog.allEvents(), isEmpty);
+
+        await harness.service.submitTask('Write docs');
+        snapshot = await harness.service.nagPromptTimedOut();
+        expect(snapshot.activeTask, isNotNull);
+        expect(await harness.activityLog.allEvents(), hasLength(1));
+
+        await harness.service.nagPromptShown();
+        await harness.service.nagPromptTimedOut();
+        await harness.service.nagPromptTimedOut();
+
+        final stopEvents = (await harness.activityLog.allEvents()).where(
+          (event) => event.eventType == ActivityEventType.stopTask,
+        );
+        expect(stopEvents, hasLength(1));
+      },
+    );
+
+    test('promptClosed preserves pending prompt state', () async {
+      final harness = await _SqliteHarness.create();
+      addTearDown(harness.dispose);
+      await harness.service.submitTask('Write docs');
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+      await harness.service.nagPromptShown();
+
+      final snapshot = await harness.service.promptClosed();
+
+      expect(snapshot.runtimeState.promptState.status, PromptStatus.visible);
+      expect(
+        snapshot.runtimeState.promptState.shownAtUtc,
+        DateTime.utc(2026, 1, 1, 9, 15),
+      );
+    });
+
+    test('recovery after unclean idle shutdown appends no event', () async {
+      final harness = await _SqliteHarness.create();
+      addTearDown(harness.dispose);
+      await harness.runtimeState.save(RuntimeState(cleanShutdown: false));
+
+      final snapshot = await harness.service.recoverOnStartup();
+
+      expect(snapshot.activeTask, isNull);
+      expect(await harness.activityLog.allEvents(), isEmpty);
+      expect(snapshot.runtimeState.promptState.status, PromptStatus.none);
+    });
+
+    test(
+      'recovery falls back to active task start without confirmation',
+      () async {
+        final harness = await _SqliteHarness.create();
+        addTearDown(harness.dispose);
+        final startedAt = DateTime.utc(2026, 1, 1, 8, 45);
+        await harness.activityLog.append(
+          ActivityLogEvent.startTask(
+            occurredAtUtc: startedAt,
+            taskText: 'Write docs',
+          ),
+        );
+        await harness.runtimeState.save(RuntimeState(cleanShutdown: false));
+
+        await harness.service.recoverOnStartup();
+
+        final events = await harness.activityLog.allEvents();
+        expect(events.last.source, ActivitySource.recovery);
+        expect(events.last.occurredAtUtc, startedAt);
+      },
+    );
   });
 }
 
@@ -266,6 +419,41 @@ final class _Harness {
   final _FakeClock clock;
   late final _MemoryTransactionRunner runner;
   late final TrackerService service;
+}
+
+final class _SqliteHarness {
+  _SqliteHarness({
+    required this.database,
+    required this.clock,
+    required this.service,
+    required this.activityLog,
+    required this.runtimeState,
+  });
+
+  final AppDatabase database;
+  final _FakeClock clock;
+  final TrackerService service;
+  final SqliteActivityLogRepository activityLog;
+  final SqliteRuntimeStateRepository runtimeState;
+
+  static Future<_SqliteHarness> create() async {
+    final database = await AppDatabase.openInMemory(
+      databaseFactory: databaseFactoryFfi,
+    );
+    final clock = _FakeClock(DateTime.utc(2026, 1, 1, 9));
+    return _SqliteHarness(
+      database: database,
+      clock: clock,
+      service: TrackerService(
+        transactions: SqliteTransactionRunner(database),
+        clock: clock,
+      ),
+      activityLog: SqliteActivityLogRepository(database.database),
+      runtimeState: SqliteRuntimeStateRepository(database.database),
+    );
+  }
+
+  Future<void> dispose() => database.close();
 }
 
 final class _FakeClock implements Clock {

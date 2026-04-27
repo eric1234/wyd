@@ -68,6 +68,135 @@ void main() {
         }
       }
     });
+
+    test('configures SQLite pragmas for production connections', () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'wyd_sqlite_pragmas_',
+      );
+      final databasePath = p.join(tempDirectory.path, 'wyd.sqlite');
+      AppDatabase? database;
+
+      try {
+        database = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+        );
+
+        final foreignKeys = await database.database.rawQuery(
+          'PRAGMA foreign_keys',
+        );
+        final journalMode = await database.database.rawQuery(
+          'PRAGMA journal_mode',
+        );
+        final busyTimeout = await database.database.rawQuery(
+          'PRAGMA busy_timeout',
+        );
+
+        expect(foreignKeys.single.values.single, 1);
+        expect(journalMode.single.values.single, 'wal');
+        expect(busyTimeout.single.values.single, 5000);
+      } finally {
+        await database?.close();
+        if (await tempDirectory.exists()) {
+          await tempDirectory.delete(recursive: true);
+        }
+      }
+    });
+
+    test('rejects rows that violate schema constraints', () async {
+      final database = await AppDatabase.openInMemory(
+        databaseFactory: databaseFactoryFfi,
+      );
+      addTearDown(database.close);
+      final timestamp = DateTime.utc(2026, 1, 1, 9).toIso8601String();
+
+      Future<void> expectConstraintFailure(Future<void> Function() action) {
+        return expectLater(action, throwsA(isA<DatabaseException>()));
+      }
+
+      await expectConstraintFailure(() async {
+        await database.database.insert('activity_log', {
+          'occurred_at_utc': timestamp,
+          'event_type': 'unknown',
+          'source': 'manual_submit',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('activity_log', {
+          'occurred_at_utc': timestamp,
+          'event_type': 'stop_task',
+          'task_text': 'Should not exist',
+          'task_text_normalized': 'should not exist',
+          'source': 'manual_stop',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('activity_log', {
+          'occurred_at_utc': timestamp,
+          'event_type': 'start_task',
+          'source': 'manual_submit',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('activity_log', {
+          'occurred_at_utc': timestamp,
+          'event_type': 'stop_task',
+          'source': 'not_a_source',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('app_state', {
+          'id': 1,
+          'pending_prompt_expired': 2,
+          'clean_shutdown': 1,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('settings', {
+          'id': 1,
+          'reminder_interval_minutes': 15,
+          'autocomplete_lookback_days': 3,
+          'response_timeout_minutes': 1,
+          'typing_deferral_seconds': 5,
+          'start_at_login': 2,
+        });
+      });
+    });
+
+    test('fails clearly when opening a newer schema version', () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'wyd_sqlite_upgrade_',
+      );
+      final databasePath = p.join(tempDirectory.path, 'wyd.sqlite');
+      AppDatabase? database;
+
+      try {
+        database = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+        );
+        await database.close();
+        database = null;
+
+        await expectLater(
+          () => AppDatabase.openAtPath(
+            databasePath,
+            databaseFactory: databaseFactoryFfi,
+            schemaVersion: AppDatabase.schemaVersion + 1,
+          ),
+          throwsA(isA<UnsupportedError>()),
+        );
+      } finally {
+        await database?.close();
+        if (await tempDirectory.exists()) {
+          await tempDirectory.delete(recursive: true);
+        }
+      }
+    });
   });
 
   group('SqliteActivityLogRepository', () {

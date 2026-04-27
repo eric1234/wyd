@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/domain/domain.dart';
@@ -58,6 +59,87 @@ void main() {
     await tester.pump();
 
     expect(find.text('Fix bug'), findsWidgets);
+    expect(client.submittedTexts, ['Fix bug']);
+  });
+
+  testWidgets('pressing Enter submits raw task text from the field', (
+    tester,
+  ) async {
+    final client = _FakeQuickEntryClient();
+    final controller = QuickEntryController(
+      client: client,
+      onSubmitted: (_) async {},
+    );
+    await controller.open(_snapshot(activeTask: null));
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.enterText(find.byType(TextField), 'Write docs');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    expect(client.submittedTexts, ['Write docs']);
+  });
+
+  testWidgets('arrow keys move the highlighted suggestion', (tester) async {
+    final client = _FakeQuickEntryClient(
+      suggestions: [_suggestion('Fix bug'), _suggestion('Fix docs')],
+    );
+    final controller = QuickEntryController(
+      client: client,
+      onSubmitted: (_) async {},
+    );
+    await controller.open(_snapshot(activeTask: null));
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+
+    expect(controller.state.highlightedIndex, 1);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+
+    expect(controller.state.highlightedIndex, 0);
+  });
+
+  testWidgets('Enter accepts the highlighted suggestion and submits', (
+    tester,
+  ) async {
+    final client = _FakeQuickEntryClient(suggestions: [_suggestion('Fix bug')]);
+    final controller = QuickEntryController(
+      client: client,
+      onSubmitted: (_) async {},
+    );
+    await controller.open(_snapshot(activeTask: null));
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.enterText(find.byType(TextField), 'fi');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    expect(client.submittedTexts, ['Fix bug']);
+  });
+
+  testWidgets('tapping a suggestion submits it immediately', (tester) async {
+    final client = _FakeQuickEntryClient(suggestions: [_suggestion('Fix bug')]);
+    final controller = QuickEntryController(
+      client: client,
+      onSubmitted: (_) async {},
+    );
+    await controller.open(_snapshot(activeTask: null));
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.tap(find.text('Fix bug'));
+    await tester.pump();
+
     expect(client.submittedTexts, ['Fix bug']);
   });
 }

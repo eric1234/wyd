@@ -69,6 +69,45 @@ void main() {
       await _disposeWidgetHarness(tester, controller);
     }
   });
+
+  testWidgets('previous and next buttons navigate dates', (tester) async {
+    final loader = _FakeReportLoader();
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: ReportView(controller: controller)),
+      );
+
+      await tester.tap(find.widgetWithIcon(IconButton, Icons.chevron_left));
+      await tester.pump();
+      expect(find.text('2026-01-01'), findsOneWidget);
+
+      await tester.tap(find.widgetWithIcon(IconButton, Icons.chevron_right));
+      await tester.pump();
+      expect(find.text('2026-01-02'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('shows error state', (tester) async {
+    final loader = _FakeReportLoader(error: StateError('report failed'));
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: ReportView(controller: controller)),
+      );
+
+      expect(find.text('Unable to load report.'), findsOneWidget);
+      expect(find.textContaining('report failed'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
 }
 
 Future<void> _disposeWidgetHarness(
@@ -80,20 +119,25 @@ Future<void> _disposeWidgetHarness(
 }
 
 final class _FakeReportLoader implements DailyReportLoader {
-  _FakeReportLoader({DailyReport? report})
-    : report =
-          report ??
-          DailyReport(
-            localDate: DateTime(2026, 1, 2),
-            totalDuration: Duration.zero,
-            rows: const [],
-          );
+  _FakeReportLoader({this.report, this.error});
 
-  final DailyReport report;
+  final DailyReport? report;
+  final Object? error;
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);
 
   @override
-  Future<DailyReport> loadDailyReport(DateTime localDate) async => report;
+  Future<DailyReport> loadDailyReport(DateTime localDate) async {
+    final error = this.error;
+    if (error != null) {
+      throw error;
+    }
+    return report ??
+        DailyReport(
+          localDate: localDate,
+          totalDuration: Duration.zero,
+          rows: const [],
+        );
+  }
 }

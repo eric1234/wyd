@@ -152,6 +152,92 @@ void main() {
       expect(harness.timers.timers.single.isActive, isFalse);
       expect(harness.timers.activeTimers, isEmpty);
     });
+
+    test('schedules overdue reminder immediately', () {
+      final harness = _Harness();
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 16);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          runtimeState: RuntimeState(
+            lastConfirmationAtUtc: DateTime.utc(2026, 1, 1, 9),
+          ),
+        ),
+      );
+
+      expect(harness.timers.activeTimers.single.duration, Duration.zero);
+    });
+
+    test('schedules overdue timeout immediately', () {
+      final harness = _Harness();
+      final shownAt = DateTime.utc(2026, 1, 1, 9, 15);
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 17);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          runtimeState: RuntimeState(promptState: PromptState.visible(shownAt)),
+        ),
+      );
+
+      expect(harness.timers.activeTimers.single.duration, Duration.zero);
+    });
+
+    test('typing deferral setting of zero disables deferral', () async {
+      final harness = _Harness(
+        typingDetector: _FakeTypingActivityDetector(
+          lastTypingAt: DateTime.utc(2026, 1, 1, 9, 15),
+        ),
+      );
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          settings: const AppSettings(typingDeferralSeconds: 0),
+          capabilities: const PlatformCapabilities(
+            supportsTypingActivity: true,
+          ),
+        ),
+      );
+      await harness.timers.fireFirst();
+
+      expect(harness.showPromptCalls, 1);
+    });
+
+    test('show prompt errors are reported and leave no active timer', () async {
+      final harness = _Harness();
+      harness.onShowPrompt = () async => throw StateError('show failed');
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+        ),
+      );
+
+      await harness.timers.fireFirst();
+
+      expect(harness.errors.single, isA<StateError>());
+      expect(harness.timers.activeTimers, isEmpty);
+    });
+
+    test('timeout errors are reported and leave no active timer', () async {
+      final harness = _Harness();
+      harness.onPromptTimedOut = () async => throw StateError('timeout failed');
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          runtimeState: RuntimeState(
+            promptState: PromptState.visible(DateTime.utc(2026, 1, 1, 9, 15)),
+          ),
+        ),
+      );
+
+      await harness.timers.fireFirst();
+
+      expect(harness.errors.single, isA<StateError>());
+      expect(harness.timers.activeTimers, isEmpty);
+    });
   });
 }
 
@@ -172,6 +258,9 @@ final class _Harness {
         timeoutCalls += 1;
         return onPromptTimedOut();
       },
+      onError: (error, stackTrace) {
+        errors.add(error);
+      },
     );
   }
 
@@ -180,6 +269,7 @@ final class _Harness {
   late final NagScheduler scheduler;
   int showPromptCalls = 0;
   int timeoutCalls = 0;
+  final List<Object> errors = [];
   late Future<AppStateSnapshot> Function() onShowPrompt = () async {
     return snapshot(
       activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),

@@ -62,6 +62,58 @@ void main() {
       expect(snapshot.settings.startAtLogin, isTrue);
       expect(harness.startupAtLogin.enabledValues, [true]);
     });
+
+    test('validates settings before changing start-at-login', () async {
+      final harness = await _Harness.create(
+        capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
+      );
+      addTearDown(harness.dispose);
+      final service = SettingsService(
+        trackerService: harness.trackerService,
+        startupAtLoginAdapter: harness.startupAtLogin,
+      );
+
+      await expectLater(
+        () => service.saveSettings(
+          const AppSettings(
+            reminderIntervalMinutes: 1,
+            responseTimeoutMinutes: 2,
+            startAtLogin: true,
+          ),
+        ),
+        throwsA(isA<AppSettingsValidationException>()),
+      );
+
+      expect(harness.startupAtLogin.enabledValues, isEmpty);
+      expect(
+        (await harness.trackerService.loadSnapshot()).settings,
+        AppSettings.defaults,
+      );
+    });
+
+    test(
+      'does not persist settings when start-at-login adapter fails',
+      () async {
+        final harness = await _Harness.create(
+          capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
+        );
+        addTearDown(harness.dispose);
+        harness.startupAtLogin.failOnSet = true;
+        final service = SettingsService(
+          trackerService: harness.trackerService,
+          startupAtLoginAdapter: harness.startupAtLogin,
+        );
+
+        await expectLater(
+          () => service.saveSettings(const AppSettings(startAtLogin: true)),
+          throwsStateError,
+        );
+
+        final snapshot = await harness.trackerService.loadSnapshot();
+        expect(snapshot.settings.startAtLogin, isFalse);
+        expect(harness.startupAtLogin.enabledValues, isEmpty);
+      },
+    );
   });
 }
 
@@ -107,6 +159,7 @@ final class _FakeClock implements Clock {
 
 final class _FakeStartupAtLoginAdapter implements StartupAtLoginAdapter {
   final List<bool> enabledValues = [];
+  bool failOnSet = false;
 
   @override
   Future<bool> isEnabled() async {
@@ -115,6 +168,9 @@ final class _FakeStartupAtLoginAdapter implements StartupAtLoginAdapter {
 
   @override
   Future<void> setEnabled(bool enabled) async {
+    if (failOnSet) {
+      throw StateError('start-at-login update failed');
+    }
     enabledValues.add(enabled);
   }
 }

@@ -53,6 +53,36 @@ void main() {
       );
     });
 
+    test('reports range validation for every numeric field', () async {
+      final client = _FakeSettingsClient(snapshot: _snapshot());
+      final controller = _controller(client);
+      await controller.open();
+
+      controller.updateReminderInterval('241');
+      controller.updateAutocompleteLookback('0');
+      controller.updateResponseTimeout('61');
+      controller.updateTypingDeferral('31');
+      await controller.commitChanges();
+
+      expect(client.savedSettings, isEmpty);
+      expect(
+        controller.state.messageFor(SettingsField.reminderIntervalMinutes),
+        'Reminder interval must be between 1 and 240.',
+      );
+      expect(
+        controller.state.messageFor(SettingsField.autocompleteLookbackDays),
+        'Autocomplete lookback must be between 1 and 30.',
+      );
+      expect(
+        controller.state.messageFor(SettingsField.responseTimeoutMinutes),
+        'Response timeout must be between 1 and 60.',
+      );
+      expect(
+        controller.state.messageFor(SettingsField.typingDeferralSeconds),
+        'Typing deferral must be between 0 and 30.',
+      );
+    });
+
     test('saves valid settings and invokes callback', () async {
       AppStateSnapshot? savedSnapshot;
       final client = _FakeSettingsClient(snapshot: _snapshot());

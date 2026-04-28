@@ -114,6 +114,31 @@ void main() {
         expect(harness.startupAtLogin.enabledValues, isEmpty);
       },
     );
+
+    test('reverts start-at-login when settings persistence fails', () async {
+      final runner = _FailingSettingsSaveRunner();
+      final trackerService = TrackerService(
+        transactions: runner,
+        clock: _FakeClock(DateTime.utc(2026, 1, 1, 9)),
+        capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
+      );
+      final startupAtLogin = _FakeStartupAtLoginAdapter();
+      final service = SettingsService(
+        trackerService: trackerService,
+        startupAtLoginAdapter: startupAtLogin,
+      );
+
+      await expectLater(
+        () => service.saveSettings(const AppSettings(startAtLogin: true)),
+        throwsStateError,
+      );
+
+      expect(startupAtLogin.enabledValues, [true, false]);
+      expect(
+        (await trackerService.loadSnapshot()).settings.startAtLogin,
+        isFalse,
+      );
+    });
   });
 }
 
@@ -172,5 +197,69 @@ final class _FakeStartupAtLoginAdapter implements StartupAtLoginAdapter {
       throw StateError('start-at-login update failed');
     }
     enabledValues.add(enabled);
+  }
+}
+
+final class _FailingSettingsSaveRunner implements TransactionRunner {
+  AppSettings settings = AppSettings.defaults;
+  RuntimeState runtimeState = RuntimeState();
+
+  @override
+  Future<T> run<T>(Future<T> Function(AppTransaction transaction) action) {
+    return action(_FailingSettingsSaveTransaction(this));
+  }
+}
+
+final class _FailingSettingsSaveTransaction implements AppTransaction {
+  _FailingSettingsSaveTransaction(_FailingSettingsSaveRunner runner)
+    : activityLog = const _EmptyActivityLogRepository(),
+      runtimeState = _MemoryRuntimeStateRepository(runner),
+      settings = _FailingSettingsRepository(runner);
+
+  @override
+  final ActivityLogRepository activityLog;
+
+  @override
+  final RuntimeStateRepository runtimeState;
+
+  @override
+  final SettingsRepository settings;
+}
+
+final class _EmptyActivityLogRepository implements ActivityLogRepository {
+  const _EmptyActivityLogRepository();
+
+  @override
+  Future<ActivityLogEvent> append(ActivityLogEvent event) async => event;
+
+  @override
+  Future<List<ActivityLogEvent>> allEvents() async => const [];
+}
+
+final class _MemoryRuntimeStateRepository implements RuntimeStateRepository {
+  const _MemoryRuntimeStateRepository(this._runner);
+
+  final _FailingSettingsSaveRunner _runner;
+
+  @override
+  Future<RuntimeState> read() async => _runner.runtimeState;
+
+  @override
+  Future<void> save(RuntimeState state) async {
+    _runner.runtimeState = state;
+  }
+}
+
+final class _FailingSettingsRepository implements SettingsRepository {
+  const _FailingSettingsRepository(this._runner);
+
+  final _FailingSettingsSaveRunner _runner;
+
+  @override
+  Future<AppSettings> read() async => _runner.settings;
+
+  @override
+  Future<void> save(AppSettings settings) {
+    throw StateError('settings save failed');
   }
 }

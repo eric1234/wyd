@@ -1,4 +1,5 @@
 export 'active_task.dart';
+export 'activity_timeline.dart';
 export 'activity_log.dart';
 export 'autocomplete.dart';
 export 'lifecycle.dart';

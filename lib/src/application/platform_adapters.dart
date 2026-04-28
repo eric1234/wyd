@@ -1,5 +1,3 @@
-import 'app_state_snapshot.dart';
-
 enum TrayMenuAction { updateTask, stopTask, report, settings, exit }
 
 final class TrayMenuEntry {
@@ -12,27 +10,6 @@ final class TrayMenuEntry {
   final TrayMenuAction action;
   final String label;
   final bool enabled;
-}
-
-final class TrayMenuPresenter {
-  const TrayMenuPresenter._();
-
-  static List<TrayMenuEntry> build(AppStateSnapshot snapshot) {
-    return [
-      const TrayMenuEntry(
-        action: TrayMenuAction.updateTask,
-        label: 'Update Task',
-      ),
-      TrayMenuEntry(
-        action: TrayMenuAction.stopTask,
-        label: 'Stop Task',
-        enabled: snapshot.activeTask != null,
-      ),
-      const TrayMenuEntry(action: TrayMenuAction.report, label: 'Report'),
-      const TrayMenuEntry(action: TrayMenuAction.settings, label: 'Settings'),
-      const TrayMenuEntry(action: TrayMenuAction.exit, label: 'Exit'),
-    ];
-  }
 }
 
 abstract interface class TrayAdapter {

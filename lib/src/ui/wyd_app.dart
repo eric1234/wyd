@@ -182,16 +182,7 @@ class WydRolePage extends StatelessWidget {
       null => const _TrayResidentPage(),
     };
 
-    if (!controller.quickEntryOverlayVisible) {
-      return page;
-    }
-
-    return Stack(
-      children: [
-        page,
-        QuickEntryOverlay(controller: controller.quickEntry),
-      ],
-    );
+    return page;
   }
 }
 

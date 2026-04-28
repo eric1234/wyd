@@ -5,11 +5,19 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 
 import '../../application/application.dart';
 
-const _roleWindowKind = 'wyd-role-window';
+final class RoleWindowProtocol {
+  const RoleWindowProtocol._();
+
+  static const kind = 'wyd-role-window';
+  static const configureMethod = 'configure';
+  static const showAndFocusMethod = 'showAndFocus';
+  static const pingMethod = 'ping';
+  static const closeMethod = 'close';
+}
 
 String encodeRoleWindowArguments(WindowRole role, {required bool showOnReady}) {
   return jsonEncode({
-    'kind': _roleWindowKind,
+    'kind': RoleWindowProtocol.kind,
     'role': role.name,
     'showOnReady': showOnReady,
   });
@@ -25,7 +33,7 @@ WindowRole? decodeRoleWindowRole(String arguments) {
     if (decoded is! Map<String, Object?>) {
       return null;
     }
-    if (decoded['kind'] != _roleWindowKind) {
+    if (decoded['kind'] != RoleWindowProtocol.kind) {
       return null;
     }
     final roleName = decoded['role'];
@@ -71,15 +79,58 @@ Map<String, Object?> encodeRoleWindowConfiguration(
 }
 
 WindowRoleConfiguration decodeRoleWindowConfiguration(Object? arguments) {
-  final decoded = Map<Object?, Object?>.from(arguments as Map);
+  if (arguments is! Map) {
+    throw const FormatException('Expected role window configuration map.');
+  }
+
+  final decoded = Map<Object?, Object?>.from(arguments);
   return WindowRoleConfiguration(
-    role: WindowRole.values.byName(decoded['role'] as String),
-    title: decoded['title'] as String,
-    width: (decoded['width'] as num).toDouble(),
-    height: (decoded['height'] as num).toDouble(),
-    resizable: decoded['resizable'] as bool? ?? true,
-    alwaysOnTop: decoded['alwaysOnTop'] as bool? ?? false,
+    role: _decodeWindowRole(_requiredString(decoded, 'role')),
+    title: _requiredString(decoded, 'title'),
+    width: _requiredNumber(decoded, 'width').toDouble(),
+    height: _requiredNumber(decoded, 'height').toDouble(),
+    resizable: _optionalBool(decoded, 'resizable', defaultValue: true),
+    alwaysOnTop: _optionalBool(decoded, 'alwaysOnTop', defaultValue: false),
   );
+}
+
+WindowRole _decodeWindowRole(String value) {
+  try {
+    return WindowRole.values.byName(value);
+  } on ArgumentError {
+    throw FormatException('Unknown role window role: $value');
+  }
+}
+
+String _requiredString(Map<Object?, Object?> decoded, String key) {
+  final value = decoded[key];
+  if (value is String) {
+    return value;
+  }
+  throw FormatException('Expected string role window field: $key');
+}
+
+num _requiredNumber(Map<Object?, Object?> decoded, String key) {
+  final value = decoded[key];
+  if (value is num) {
+    return value;
+  }
+  throw FormatException('Expected numeric role window field: $key');
+}
+
+bool _optionalBool(
+  Map<Object?, Object?> decoded,
+  String key, {
+  required bool defaultValue,
+}) {
+  final value = decoded[key];
+  if (value == null) {
+    return defaultValue;
+  }
+  if (value is bool) {
+    return value;
+  }
+  throw FormatException('Expected boolean role window field: $key');
 }
 
 final class DesktopMultiWindowAdapter implements WindowAdapter {
@@ -156,7 +207,10 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
       return;
     }
 
-    await _invokeChildWindow<void>(handle, 'showAndFocus');
+    await _invokeChildWindow<void>(
+      handle,
+      RoleWindowProtocol.showAndFocusMethod,
+    );
   }
 
   @override
@@ -171,7 +225,7 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
 
     await _invokeChildWindow<void>(
       handle,
-      'configure',
+      RoleWindowProtocol.configureMethod,
       encodeRoleWindowConfiguration(configuration),
     );
   }
@@ -184,7 +238,7 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
     }
 
     if (await _isChildWindowOpen(handle.id)) {
-      await _invokeChildWindow<void>(handle, 'close');
+      await _invokeChildWindow<void>(handle, RoleWindowProtocol.closeMethod);
     }
     _childWindowRoles.remove(handle.id);
   }
@@ -221,7 +275,10 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
     Object? lastError;
     for (var attempt = 0; attempt < 40; attempt += 1) {
       try {
-        final ready = await _invokeChildWindow<bool>(handle, 'ping');
+        final ready = await _invokeChildWindow<bool>(
+          handle,
+          RoleWindowProtocol.pingMethod,
+        );
         if (ready ?? false) {
           return;
         }

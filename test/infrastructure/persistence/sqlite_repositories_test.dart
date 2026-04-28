@@ -300,9 +300,9 @@ void main() {
           ),
         );
 
-        final activeTask = TaskLifecycle.deriveActiveTask(
+        final activeTask = ActivityTimeline(
           await repository.allEvents(),
-        );
+        ).activeTask;
 
         expect(activeTask, isNotNull);
         expect(activeTask!.taskText, 'Fix bug');

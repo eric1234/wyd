@@ -2,26 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/domain/domain.dart';
 
 void main() {
-  group('AutocompleteEngine', () {
+  group('ActivityTimeline autocomplete', () {
     test('deduplicates by normalized text and keeps most recent raw label', () {
       final now = DateTime.utc(2026, 1, 10, 12);
-      final suggestions = AutocompleteEngine.suggestions(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: now.subtract(const Duration(days: 2)),
-            taskText: 'Fix   Bug',
-          ),
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: now.subtract(const Duration(hours: 1)),
-            taskText: 'fix bug',
-          ),
-        ],
-        query: 'fi',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline([
+        ActivityLogEvent.startTask(
+          id: 1,
+          occurredAtUtc: now.subtract(const Duration(days: 2)),
+          taskText: 'Fix   Bug',
+        ),
+        ActivityLogEvent.switchTask(
+          id: 2,
+          occurredAtUtc: now.subtract(const Duration(hours: 1)),
+          taskText: 'fix bug',
+        ),
+      ]).autocompleteSuggestions(query: 'fi', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions, hasLength(1));
       expect(suggestions.single.taskText, 'fix bug');
@@ -30,23 +25,18 @@ void main() {
 
     test('ranks prefix matches before newer substring matches', () {
       final now = DateTime.utc(2026, 1, 10, 12);
-      final suggestions = AutocompleteEngine.suggestions(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: now.subtract(const Duration(hours: 3)),
-            taskText: 'Bug triage',
-          ),
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: now.subtract(const Duration(minutes: 10)),
-            taskText: 'Investigate bug',
-          ),
-        ],
-        query: 'bug',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline([
+        ActivityLogEvent.startTask(
+          id: 1,
+          occurredAtUtc: now.subtract(const Duration(hours: 3)),
+          taskText: 'Bug triage',
+        ),
+        ActivityLogEvent.switchTask(
+          id: 2,
+          occurredAtUtc: now.subtract(const Duration(minutes: 10)),
+          taskText: 'Investigate bug',
+        ),
+      ]).autocompleteSuggestions(query: 'bug', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions.map((suggestion) => suggestion.taskText), [
         'Bug triage',
@@ -58,23 +48,18 @@ void main() {
 
     test('orders matches by recency within the same match class', () {
       final now = DateTime.utc(2026, 1, 10, 12);
-      final suggestions = AutocompleteEngine.suggestions(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: now.subtract(const Duration(hours: 4)),
-            taskText: 'Fix docs',
-          ),
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: now.subtract(const Duration(hours: 1)),
-            taskText: 'Fix bug',
-          ),
-        ],
-        query: 'fix',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline([
+        ActivityLogEvent.startTask(
+          id: 1,
+          occurredAtUtc: now.subtract(const Duration(hours: 4)),
+          taskText: 'Fix docs',
+        ),
+        ActivityLogEvent.switchTask(
+          id: 2,
+          occurredAtUtc: now.subtract(const Duration(hours: 1)),
+          taskText: 'Fix bug',
+        ),
+      ]).autocompleteSuggestions(query: 'fix', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions.map((suggestion) => suggestion.taskText), [
         'Fix bug',
@@ -84,28 +69,23 @@ void main() {
 
     test('ignores stop events and events outside the lookback window', () {
       final now = DateTime.utc(2026, 1, 10, 12);
-      final suggestions = AutocompleteEngine.suggestions(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: now.subtract(const Duration(days: 4)),
-            taskText: 'Old task',
-          ),
-          ActivityLogEvent.stopTask(
-            id: 2,
-            occurredAtUtc: now.subtract(const Duration(minutes: 5)),
-            source: ActivitySource.manualStop,
-          ),
-          ActivityLogEvent.switchTask(
-            id: 3,
-            occurredAtUtc: now.subtract(const Duration(minutes: 1)),
-            taskText: 'New task',
-          ),
-        ],
-        query: 'task',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline([
+        ActivityLogEvent.startTask(
+          id: 1,
+          occurredAtUtc: now.subtract(const Duration(days: 4)),
+          taskText: 'Old task',
+        ),
+        ActivityLogEvent.stopTask(
+          id: 2,
+          occurredAtUtc: now.subtract(const Duration(minutes: 5)),
+          source: ActivitySource.manualStop,
+        ),
+        ActivityLogEvent.switchTask(
+          id: 3,
+          occurredAtUtc: now.subtract(const Duration(minutes: 1)),
+          taskText: 'New task',
+        ),
+      ]).autocompleteSuggestions(query: 'task', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions.map((suggestion) => suggestion.taskText), [
         'New task',
@@ -114,23 +94,18 @@ void main() {
 
     test('ignores future events', () {
       final now = DateTime.utc(2026, 1, 10, 12);
-      final suggestions = AutocompleteEngine.suggestions(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: now.add(const Duration(minutes: 1)),
-            taskText: 'Future task',
-          ),
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: now.subtract(const Duration(minutes: 1)),
-            taskText: 'Current task',
-          ),
-        ],
-        query: 'task',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline([
+        ActivityLogEvent.startTask(
+          id: 1,
+          occurredAtUtc: now.add(const Duration(minutes: 1)),
+          taskText: 'Future task',
+        ),
+        ActivityLogEvent.switchTask(
+          id: 2,
+          occurredAtUtc: now.subtract(const Duration(minutes: 1)),
+          taskText: 'Current task',
+        ),
+      ]).autocompleteSuggestions(query: 'task', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions.map((suggestion) => suggestion.taskText), [
         'Current task',
@@ -140,23 +115,18 @@ void main() {
     test('uses id tie-breaker for most recent raw label', () {
       final now = DateTime.utc(2026, 1, 10, 12);
       final sameTime = now.subtract(const Duration(hours: 1));
-      final suggestions = AutocompleteEngine.suggestions(
-        events: [
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: sameTime,
-            taskText: 'task   name',
-          ),
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: sameTime,
-            taskText: 'Task Name',
-          ),
-        ],
-        query: 'task',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline([
+        ActivityLogEvent.switchTask(
+          id: 2,
+          occurredAtUtc: sameTime,
+          taskText: 'task   name',
+        ),
+        ActivityLogEvent.startTask(
+          id: 1,
+          occurredAtUtc: sameTime,
+          taskText: 'Task Name',
+        ),
+      ]).autocompleteSuggestions(query: 'task', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions.single.taskText, 'task   name');
     });
@@ -172,12 +142,9 @@ void main() {
         ),
       );
 
-      final suggestions = AutocompleteEngine.suggestions(
-        events: events,
-        query: '',
-        nowUtc: now,
-        lookbackDays: 3,
-      );
+      final suggestions = ActivityTimeline(
+        events,
+      ).autocompleteSuggestions(query: '', nowUtc: now, lookbackDays: 3);
 
       expect(suggestions, hasLength(5));
     });

@@ -1,3 +1,4 @@
+export 'desktop_platform_bindings.dart';
 export 'method_channel_single_instance_adapter.dart';
 export 'multi_window_adapter.dart';
 export 'tray_manager_adapter.dart';

@@ -7,5 +7,7 @@ export 'report_service.dart';
 export 'repositories.dart';
 export 'settings_service.dart';
 export 'single_writer.dart';
+export 'tracking_session.dart';
 export 'tracker_service.dart';
+export 'tray_menu_presenter.dart';
 export 'window_coordinator.dart';

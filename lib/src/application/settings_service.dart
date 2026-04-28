@@ -36,11 +36,28 @@ final class SettingsService implements SettingsClient {
       throw AppSettingsValidationException(issues);
     }
 
-    if (capabilities.supportsStartAtLogin &&
-        current.settings.startAtLogin != normalizedSettings.startAtLogin) {
+    final shouldUpdateStartup =
+        capabilities.supportsStartAtLogin &&
+        current.settings.startAtLogin != normalizedSettings.startAtLogin;
+    var startupUpdated = false;
+    if (shouldUpdateStartup) {
       await _startupAtLoginAdapter.setEnabled(normalizedSettings.startAtLogin);
+      startupUpdated = true;
     }
 
-    return _trackerService.updateSettings(normalizedSettings);
+    try {
+      return await _trackerService.updateSettings(normalizedSettings);
+    } catch (_) {
+      if (startupUpdated) {
+        try {
+          await _startupAtLoginAdapter.setEnabled(
+            current.settings.startAtLogin,
+          );
+        } catch (_) {
+          // Preserve the persistence failure; persisted settings remain authoritative.
+        }
+      }
+      rethrow;
+    }
   }
 }

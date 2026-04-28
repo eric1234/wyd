@@ -121,7 +121,7 @@ final class SettingsController extends ChangeNotifier {
 
     try {
       final snapshot = await _client.loadSettingsSnapshot();
-      _lastSavedSettings = _settingsForState(snapshot);
+      _lastSavedSettings = _SettingsDraft.fromSnapshot(snapshot).toSettings();
       _draftRevision += 1;
       _setState(_fromSnapshot(snapshot).copyWith(isOpen: true));
     } catch (error) {
@@ -224,8 +224,7 @@ final class SettingsController extends ChangeNotifier {
       return;
     }
 
-    if (_saveQueueFuture == null &&
-        _settingsEqual(settings, _lastSavedSettings)) {
+    if (_saveQueueFuture == null && settings == _lastSavedSettings) {
       _queuedSave = null;
       _setState(
         _state.copyWith(
@@ -239,8 +238,8 @@ final class SettingsController extends ChangeNotifier {
     }
 
     if (_saveQueueFuture != null &&
-        (_settingsEqual(settings, _activeSave?.settings) ||
-            _settingsEqual(settings, _queuedSave?.settings))) {
+        (settings == _activeSave?.settings ||
+            settings == _queuedSave?.settings)) {
       await _saveQueueFuture;
       return;
     }
@@ -308,7 +307,7 @@ final class SettingsController extends ChangeNotifier {
 
     try {
       final snapshot = await _client.saveSettings(request.settings);
-      _lastSavedSettings = _settingsForState(snapshot);
+      _lastSavedSettings = _SettingsDraft.fromSnapshot(snapshot).toSettings();
       final saveMatchesCurrentDraft = request.draftRevision == _draftRevision;
       if (saveMatchesCurrentDraft) {
         _setState(
@@ -360,12 +359,56 @@ final class SettingsController extends ChangeNotifier {
   }
 
   SettingsState _fromSnapshot(AppStateSnapshot snapshot) {
+    return _SettingsDraft.fromSnapshot(snapshot).toState(isOpen: _state.isOpen);
+  }
+
+  _SettingsParseResult _parseSettings() {
+    return _SettingsDraft.fromState(_state).parse();
+  }
+
+  bool _draftIsDirty() {
+    return _SettingsDraft.fromState(
+      _state,
+    ).isDirtyComparedWith(_lastSavedSettings);
+  }
+
+  void _setState(SettingsState state) {
+    _state = state;
+    notifyListeners();
+  }
+}
+
+final class _SettingsParseResult {
+  const _SettingsParseResult({this.settings, this.issues = const []});
+
+  final AppSettings? settings;
+  final List<SettingsValidationIssue> issues;
+}
+
+final class _SettingsDraft {
+  const _SettingsDraft({
+    required this.reminderIntervalMinutes,
+    required this.autocompleteLookbackDays,
+    required this.responseTimeoutMinutes,
+    required this.typingDeferralSeconds,
+    required this.startAtLogin,
+    required this.capabilities,
+  });
+
+  factory _SettingsDraft.fromState(SettingsState state) {
+    return _SettingsDraft(
+      reminderIntervalMinutes: state.reminderIntervalMinutes,
+      autocompleteLookbackDays: state.autocompleteLookbackDays,
+      responseTimeoutMinutes: state.responseTimeoutMinutes,
+      typingDeferralSeconds: state.typingDeferralSeconds,
+      startAtLogin: state.startAtLogin,
+      capabilities: state.capabilities,
+    );
+  }
+
+  factory _SettingsDraft.fromSnapshot(AppStateSnapshot snapshot) {
     final settings = snapshot.settings;
-    return SettingsState(
-      isOpen: _state.isOpen,
-      loading: false,
-      saving: false,
-      dirty: false,
+    return _SettingsDraft(
       reminderIntervalMinutes: settings.reminderIntervalMinutes.toString(),
       autocompleteLookbackDays: settings.autocompleteLookbackDays.toString(),
       responseTimeoutMinutes: settings.responseTimeoutMinutes.toString(),
@@ -376,28 +419,58 @@ final class SettingsController extends ChangeNotifier {
     );
   }
 
-  _SettingsParseResult _parseSettings() {
+  final String reminderIntervalMinutes;
+  final String autocompleteLookbackDays;
+  final String responseTimeoutMinutes;
+  final String typingDeferralSeconds;
+  final bool startAtLogin;
+  final PlatformCapabilities capabilities;
+
+  SettingsState toState({required bool isOpen}) {
+    return SettingsState(
+      isOpen: isOpen,
+      loading: false,
+      saving: false,
+      dirty: false,
+      reminderIntervalMinutes: reminderIntervalMinutes,
+      autocompleteLookbackDays: autocompleteLookbackDays,
+      responseTimeoutMinutes: responseTimeoutMinutes,
+      typingDeferralSeconds: typingDeferralSeconds,
+      startAtLogin: startAtLogin,
+      capabilities: capabilities,
+    );
+  }
+
+  AppSettings toSettings() {
+    final result = parse();
+    if (result.settings == null) {
+      throw StateError('Snapshot settings did not parse.');
+    }
+    return result.settings!;
+  }
+
+  _SettingsParseResult parse() {
     final issues = <SettingsValidationIssue>[];
     final reminderInterval = _parseWholeNumber(
-      _state.reminderIntervalMinutes,
+      reminderIntervalMinutes,
       field: SettingsField.reminderIntervalMinutes,
       label: 'Reminder interval',
       issues: issues,
     );
     final autocompleteLookback = _parseWholeNumber(
-      _state.autocompleteLookbackDays,
+      autocompleteLookbackDays,
       field: SettingsField.autocompleteLookbackDays,
       label: 'Autocomplete lookback',
       issues: issues,
     );
     final responseTimeout = _parseWholeNumber(
-      _state.responseTimeoutMinutes,
+      responseTimeoutMinutes,
       field: SettingsField.responseTimeoutMinutes,
       label: 'Response timeout',
       issues: issues,
     );
     final typingDeferral = _parseWholeNumber(
-      _state.typingDeferralSeconds,
+      typingDeferralSeconds,
       field: SettingsField.typingDeferralSeconds,
       label: 'Typing deferral',
       issues: issues,
@@ -413,10 +486,22 @@ final class SettingsController extends ChangeNotifier {
         autocompleteLookbackDays: autocompleteLookback!,
         responseTimeoutMinutes: responseTimeout!,
         typingDeferralSeconds: typingDeferral!,
-        startAtLogin:
-            _state.capabilities.supportsStartAtLogin && _state.startAtLogin,
+        startAtLogin: capabilities.supportsStartAtLogin && startAtLogin,
       ),
     );
+  }
+
+  bool isDirtyComparedWith(AppSettings? savedSettings) {
+    final parseResult = parse();
+    final settings = parseResult.settings;
+    if (parseResult.issues.isNotEmpty || settings == null) {
+      return true;
+    }
+    if (settings.validate().isNotEmpty) {
+      return true;
+    }
+
+    return settings != savedSettings;
   }
 
   int? _parseWholeNumber(
@@ -438,48 +523,6 @@ final class SettingsController extends ChangeNotifier {
 
     return parsed;
   }
-
-  bool _draftIsDirty() {
-    final parseResult = _parseSettings();
-    final settings = parseResult.settings;
-    if (parseResult.issues.isNotEmpty || settings == null) {
-      return true;
-    }
-    if (settings.validate().isNotEmpty) {
-      return true;
-    }
-
-    return !_settingsEqual(settings, _lastSavedSettings);
-  }
-
-  AppSettings _settingsForState(AppStateSnapshot snapshot) {
-    return snapshot.settings.copyWith(
-      startAtLogin:
-          snapshot.capabilities.supportsStartAtLogin &&
-          snapshot.settings.startAtLogin,
-    );
-  }
-
-  bool _settingsEqual(AppSettings settings, AppSettings? other) {
-    return other != null &&
-        settings.reminderIntervalMinutes == other.reminderIntervalMinutes &&
-        settings.autocompleteLookbackDays == other.autocompleteLookbackDays &&
-        settings.responseTimeoutMinutes == other.responseTimeoutMinutes &&
-        settings.typingDeferralSeconds == other.typingDeferralSeconds &&
-        settings.startAtLogin == other.startAtLogin;
-  }
-
-  void _setState(SettingsState state) {
-    _state = state;
-    notifyListeners();
-  }
-}
-
-final class _SettingsParseResult {
-  const _SettingsParseResult({this.settings, this.issues = const []});
-
-  final AppSettings? settings;
-  final List<SettingsValidationIssue> issues;
 }
 
 final class _SettingsSaveRequest {

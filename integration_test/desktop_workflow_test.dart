@@ -130,7 +130,6 @@ void main() {
     await _pumpFrames(tester);
 
     expect(harness.controller.activeRole, WindowRole.quickEntry);
-    expect(harness.controller.quickEntryOverlayVisible, isFalse);
     expect(harness.window.handles.keys, contains(WindowRole.report));
     expect(harness.window.handles.keys, contains(WindowRole.quickEntry));
     expect(find.byType(TextField), findsOneWidget);

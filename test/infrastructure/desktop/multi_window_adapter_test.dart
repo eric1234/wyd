@@ -46,5 +46,25 @@ void main() {
       expect(decoded.resizable, configuration.resizable);
       expect(decoded.alwaysOnTop, configuration.alwaysOnTop);
     });
+
+    test('throws format exceptions for malformed configuration maps', () {
+      expect(
+        () => decodeRoleWindowConfiguration(null),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => decodeRoleWindowConfiguration({'role': 'missing'}),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => decodeRoleWindowConfiguration({
+          'role': 'report',
+          'title': 'Report',
+          'width': 'wide',
+          'height': 560,
+        }),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 }

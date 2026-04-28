@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/domain/domain.dart';
 
 void main() {
-  group('ReportDeriver', () {
+  group('ActivityTimeline reports', () {
     test('splits a segment that crosses local midnight', () {
       final startLocal = DateTime(2026, 1, 1, 23, 30);
       final stopLocal = DateTime(2026, 1, 2, 0, 30);
@@ -19,13 +19,11 @@ void main() {
         ),
       ];
 
-      final firstDay = ReportDeriver.buildDailyReport(
-        events: events,
+      final firstDay = ActivityTimeline(events).buildDailyReport(
         localDate: DateTime(2026, 1, 1),
         nowUtc: stopLocal.toUtc(),
       );
-      final secondDay = ReportDeriver.buildDailyReport(
-        events: events,
+      final secondDay = ActivityTimeline(events).buildDailyReport(
         localDate: DateTime(2026, 1, 2),
         nowUtc: stopLocal.toUtc(),
       );
@@ -37,17 +35,17 @@ void main() {
     test('ends an active current-day segment at injected now', () {
       final startLocal = DateTime(2026, 1, 2, 10);
       final nowLocal = DateTime(2026, 1, 2, 11, 15);
-      final report = ReportDeriver.buildDailyReport(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: startLocal.toUtc(),
-            taskText: 'Write docs',
-          ),
-        ],
-        localDate: DateTime(2026, 1, 2),
-        nowUtc: nowLocal.toUtc(),
-      );
+      final report =
+          ActivityTimeline([
+            ActivityLogEvent.startTask(
+              id: 1,
+              occurredAtUtc: startLocal.toUtc(),
+              taskText: 'Write docs',
+            ),
+          ]).buildDailyReport(
+            localDate: DateTime(2026, 1, 2),
+            nowUtc: nowLocal.toUtc(),
+          );
 
       expect(report.totalDuration, const Duration(minutes: 75));
       expect(report.rows.single.taskText, 'Write docs');
@@ -78,8 +76,7 @@ void main() {
         ),
       ];
 
-      final report = ReportDeriver.buildDailyReport(
-        events: events,
+      final report = ActivityTimeline(events).buildDailyReport(
         localDate: day,
         nowUtc: DateTime(2026, 1, 2, 12).toUtc(),
       );
@@ -92,54 +89,54 @@ void main() {
     });
 
     test('sorts report rows by duration descending', () {
-      final report = ReportDeriver.buildDailyReport(
-        events: [
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: DateTime(2026, 1, 2, 9).toUtc(),
-            taskText: 'Short',
-          ),
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: DateTime(2026, 1, 2, 9, 30).toUtc(),
-            taskText: 'Long',
-          ),
-          ActivityLogEvent.stopTask(
-            id: 3,
-            occurredAtUtc: DateTime(2026, 1, 2, 11).toUtc(),
-            source: ActivitySource.manualStop,
-          ),
-        ],
-        localDate: DateTime(2026, 1, 2),
-        nowUtc: DateTime(2026, 1, 2, 11).toUtc(),
-      );
+      final report =
+          ActivityTimeline([
+            ActivityLogEvent.startTask(
+              id: 1,
+              occurredAtUtc: DateTime(2026, 1, 2, 9).toUtc(),
+              taskText: 'Short',
+            ),
+            ActivityLogEvent.switchTask(
+              id: 2,
+              occurredAtUtc: DateTime(2026, 1, 2, 9, 30).toUtc(),
+              taskText: 'Long',
+            ),
+            ActivityLogEvent.stopTask(
+              id: 3,
+              occurredAtUtc: DateTime(2026, 1, 2, 11).toUtc(),
+              source: ActivitySource.manualStop,
+            ),
+          ]).buildDailyReport(
+            localDate: DateTime(2026, 1, 2),
+            nowUtc: DateTime(2026, 1, 2, 11).toUtc(),
+          );
 
       expect(report.rows.map((row) => row.taskText), ['Long', 'Short']);
     });
 
     test('orders same-timestamp events by id when deriving segments', () {
       final switchTime = DateTime.utc(2026, 1, 2, 10);
-      final report = ReportDeriver.buildDailyReport(
-        events: [
-          ActivityLogEvent.switchTask(
-            id: 3,
-            occurredAtUtc: switchTime,
-            taskText: 'Task B',
-          ),
-          ActivityLogEvent.startTask(
-            id: 1,
-            occurredAtUtc: DateTime.utc(2026, 1, 2, 9),
-            taskText: 'Task A',
-          ),
-          ActivityLogEvent.stopTask(
-            id: 2,
-            occurredAtUtc: switchTime,
-            source: ActivitySource.manualStop,
-          ),
-        ],
-        localDate: DateTime(2026, 1, 2),
-        nowUtc: DateTime.utc(2026, 1, 2, 11),
-      );
+      final report =
+          ActivityTimeline([
+            ActivityLogEvent.switchTask(
+              id: 3,
+              occurredAtUtc: switchTime,
+              taskText: 'Task B',
+            ),
+            ActivityLogEvent.startTask(
+              id: 1,
+              occurredAtUtc: DateTime.utc(2026, 1, 2, 9),
+              taskText: 'Task A',
+            ),
+            ActivityLogEvent.stopTask(
+              id: 2,
+              occurredAtUtc: switchTime,
+              source: ActivitySource.manualStop,
+            ),
+          ]).buildDailyReport(
+            localDate: DateTime(2026, 1, 2),
+            nowUtc: DateTime.utc(2026, 1, 2, 11),
+          );
 
       expect(report.rows.map((row) => row.taskText), ['Task A', 'Task B']);
       expect(report.rows.map((row) => row.duration), [
@@ -149,32 +146,32 @@ void main() {
     });
 
     test('handles malformed sequences without failing', () {
-      final report = ReportDeriver.buildDailyReport(
-        events: [
-          ActivityLogEvent.stopTask(
-            id: 1,
-            occurredAtUtc: DateTime(2026, 1, 2, 8).toUtc(),
-            source: ActivitySource.manualStop,
-          ),
-          ActivityLogEvent.switchTask(
-            id: 2,
-            occurredAtUtc: DateTime(2026, 1, 2, 9).toUtc(),
-            taskText: 'Recovered active task',
-          ),
-          ActivityLogEvent.startTask(
-            id: 3,
-            occurredAtUtc: DateTime(2026, 1, 2, 10).toUtc(),
-            taskText: 'Replacement task',
-          ),
-          ActivityLogEvent.stopTask(
-            id: 4,
-            occurredAtUtc: DateTime(2026, 1, 2, 11).toUtc(),
-            source: ActivitySource.manualStop,
-          ),
-        ],
-        localDate: DateTime(2026, 1, 2),
-        nowUtc: DateTime(2026, 1, 2, 11).toUtc(),
-      );
+      final report =
+          ActivityTimeline([
+            ActivityLogEvent.stopTask(
+              id: 1,
+              occurredAtUtc: DateTime(2026, 1, 2, 8).toUtc(),
+              source: ActivitySource.manualStop,
+            ),
+            ActivityLogEvent.switchTask(
+              id: 2,
+              occurredAtUtc: DateTime(2026, 1, 2, 9).toUtc(),
+              taskText: 'Recovered active task',
+            ),
+            ActivityLogEvent.startTask(
+              id: 3,
+              occurredAtUtc: DateTime(2026, 1, 2, 10).toUtc(),
+              taskText: 'Replacement task',
+            ),
+            ActivityLogEvent.stopTask(
+              id: 4,
+              occurredAtUtc: DateTime(2026, 1, 2, 11).toUtc(),
+              source: ActivitySource.manualStop,
+            ),
+          ]).buildDailyReport(
+            localDate: DateTime(2026, 1, 2),
+            nowUtc: DateTime(2026, 1, 2, 11).toUtc(),
+          );
 
       expect(report.totalDuration, const Duration(hours: 2));
       expect(report.rows, hasLength(2));

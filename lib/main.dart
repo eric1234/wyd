@@ -39,20 +39,25 @@ Future<void> main(List<String> args) async {
 Future<void> _runTrayApp() async {
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
-  final trackerService = _trackerService(database, clock);
+  final platformBindings = DesktopPlatformBindings.current();
+  final trackerService = _trackerService(
+    database,
+    clock,
+    platformBindings.capabilities,
+  );
   final reportService = ReportService(
     transactions: SqliteTransactionRunner(database),
     clock: clock,
   );
   final settingsService = SettingsService(
     trackerService: trackerService,
-    startupAtLoginAdapter: XdgAutostartStartupAtLoginAdapter(),
+    startupAtLoginAdapter: platformBindings.startupAtLoginAdapter,
   );
   late final WydAppController controller;
   final nagScheduler = NagScheduler(
     clock: clock,
     timerFactory: const DartSchedulerTimerFactory(),
-    typingActivityDetector: const UnsupportedTypingActivityDetector(),
+    typingActivityDetector: platformBindings.typingActivityDetector,
     onShowPrompt: () => controller.showNagPrompt(),
     onPromptTimedOut: () => controller.nagPromptTimedOut(),
   );
@@ -66,7 +71,7 @@ Future<void> _runTrayApp() async {
     ),
     nagScheduler: nagScheduler,
     singleInstanceAdapter: MethodChannelSingleInstanceAdapter(),
-    powerEventAdapter: const UnsupportedPowerEventAdapter(),
+    powerEventAdapter: platformBindings.powerEventAdapter,
     reportController: ReportController(reportService),
     settingsController: SettingsController(
       client: settingsService,
@@ -96,7 +101,12 @@ Future<void> _runRoleWindow(
 }) async {
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
-  final trackerService = _trackerService(database, clock);
+  final platformBindings = DesktopPlatformBindings.current();
+  final trackerService = _trackerService(
+    database,
+    clock,
+    platformBindings.capabilities,
+  );
   final windowConfiguration = WindowRoleConfiguration.forRole(role);
   final windowConfigurator = DesktopWindowConfigurator();
   ReportController? reportController;
@@ -112,15 +122,15 @@ Future<void> _runRoleWindow(
   await closeHandler.initialize();
   await windowController.setWindowMethodHandler((call) async {
     switch (call.method) {
-      case 'configure':
+      case RoleWindowProtocol.configureMethod:
         await windowConfigurator.apply(
           decodeRoleWindowConfiguration(call.arguments),
         );
-      case 'showAndFocus':
+      case RoleWindowProtocol.showAndFocusMethod:
         await windowConfigurator.showAndFocus();
-      case 'ping':
+      case RoleWindowProtocol.pingMethod:
         return ready;
-      case 'close':
+      case RoleWindowProtocol.closeMethod:
         await settingsController?.close();
         await database.close();
         await closeHandler.forceClose();
@@ -140,7 +150,7 @@ Future<void> _runRoleWindow(
     case WindowRole.settings:
       final settingsService = SettingsService(
         trackerService: trackerService,
-        startupAtLoginAdapter: XdgAutostartStartupAtLoginAdapter(),
+        startupAtLoginAdapter: platformBindings.startupAtLoginAdapter,
       );
       settingsController = SettingsController(
         client: settingsService,
@@ -170,16 +180,16 @@ Future<void> _runRoleWindow(
   });
 }
 
-TrackerService _trackerService(AppDatabase database, Clock clock) {
+TrackerService _trackerService(
+  AppDatabase database,
+  Clock clock,
+  PlatformCapabilities capabilities,
+) {
   return TrackerService(
     transactions: SqliteTransactionRunner(database),
     clock: clock,
     logger: const EnvironmentDiagnosticLogger(),
-    capabilities: const PlatformCapabilities(
-      supportsStartAtLogin: true,
-      supportsTrayClickActions: true,
-      supportsTrayRelativePositioning: false,
-    ),
+    capabilities: capabilities,
   );
 }
 

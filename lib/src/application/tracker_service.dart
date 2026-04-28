@@ -4,6 +4,7 @@ import 'clock.dart';
 import 'diagnostic_logger.dart';
 import 'repositories.dart';
 import 'single_writer.dart';
+import 'tracking_session.dart';
 
 final class AppSettingsValidationException implements Exception {
   const AppSettingsValidationException(this.issues);
@@ -52,28 +53,11 @@ final class TrackerService {
 
   Future<AppStateSnapshot> submitTask(String taskText) {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final events = await transaction.activityLog.allEvents();
-      final decision = TaskLifecycle.submitTask(
-        events: events,
-        taskText: taskText,
-        occurredAtUtc: nowUtc,
-        createdAtUtc: nowUtc,
-      );
-
-      if (decision.event != null) {
-        await transaction.activityLog.append(decision.event!);
-      }
-
-      final state = await transaction.runtimeState.read();
-      await transaction.runtimeState.save(
-        state.copyWith(
-          lastConfirmationAtUtc: nowUtc,
-          promptState: const PromptState.none(),
-          cleanShutdown: false,
-        ),
-      );
-
-      _logger.debug('submitTask ${decision.action.name}');
+      final transition = (await _loadTrackingSession(
+        transaction,
+      )).submitTask(taskText: taskText, nowUtc: nowUtc);
+      await _applyTransition(transaction, transition);
+      _logger.debug('submitTask ${transition.diagnosticAction}');
     });
   }
 
@@ -81,102 +65,37 @@ final class TrackerService {
     ActivitySource source = ActivitySource.manualStop,
   }) {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final events = await transaction.activityLog.allEvents();
-      final decision = TaskLifecycle.stopTask(
-        events: events,
-        occurredAtUtc: nowUtc,
-        source: source,
-        createdAtUtc: nowUtc,
-      );
-
-      if (decision.event == null) {
-        return;
-      }
-
-      await transaction.activityLog.append(decision.event!);
-      final state = await transaction.runtimeState.read();
-      await transaction.runtimeState.save(
-        state.copyWith(
-          promptState: const PromptState.none(),
-          cleanShutdown: false,
-        ),
-      );
+      final transition = (await _loadTrackingSession(
+        transaction,
+      )).stopTask(nowUtc: nowUtc, source: source);
+      await _applyTransition(transaction, transition);
     });
   }
 
   Future<AppStateSnapshot> exitRequested() {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final events = await transaction.activityLog.allEvents();
-      final activeTask = TaskLifecycle.deriveActiveTask(events);
-      final state = await transaction.runtimeState.read();
-
-      if (activeTask != null &&
-          state.promptState.status != PromptStatus.expired) {
-        await transaction.activityLog.append(
-          ActivityLogEvent.stopTask(
-            occurredAtUtc: nowUtc,
-            source: ActivitySource.exit,
-            createdAtUtc: nowUtc,
-          ),
-        );
-      }
-
-      await transaction.runtimeState.save(
-        state.copyWith(
-          promptState: const PromptState.none(),
-          cleanShutdown: true,
-        ),
-      );
+      final transition = (await _loadTrackingSession(
+        transaction,
+      )).exitRequested(nowUtc: nowUtc);
+      await _applyTransition(transaction, transition);
     });
   }
 
   Future<AppStateSnapshot> nagPromptShown() {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final events = await transaction.activityLog.allEvents();
-      if (TaskLifecycle.deriveActiveTask(events) == null) {
-        return;
-      }
-
-      final state = await transaction.runtimeState.read();
-      if (state.promptState.isPending) {
-        return;
-      }
-
-      await transaction.runtimeState.save(
-        state.copyWith(
-          promptState: PromptState.visible(nowUtc),
-          cleanShutdown: false,
-        ),
-      );
+      final transition = (await _loadTrackingSession(
+        transaction,
+      )).nagPromptShown(nowUtc: nowUtc);
+      await _applyTransition(transaction, transition);
     });
   }
 
   Future<AppStateSnapshot> nagPromptTimedOut() {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final events = await transaction.activityLog.allEvents();
-      final activeTask = TaskLifecycle.deriveActiveTask(events);
-      final state = await transaction.runtimeState.read();
-      final shownAtUtc = state.promptState.shownAtUtc;
-
-      if (activeTask == null ||
-          shownAtUtc == null ||
-          state.promptState.status == PromptStatus.expired) {
-        return;
-      }
-
-      await transaction.activityLog.append(
-        ActivityLogEvent.stopTask(
-          occurredAtUtc: shownAtUtc,
-          source: ActivitySource.nagTimeout,
-          createdAtUtc: nowUtc,
-        ),
-      );
-      await transaction.runtimeState.save(
-        state.copyWith(
-          promptState: PromptState.expired(shownAtUtc),
-          cleanShutdown: false,
-        ),
-      );
+      final transition = (await _loadTrackingSession(
+        transaction,
+      )).nagPromptTimedOut(nowUtc: nowUtc);
+      await _applyTransition(transaction, transition);
     });
   }
 
@@ -199,37 +118,10 @@ final class TrackerService {
 
   Future<AppStateSnapshot> recoverOnStartup() {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final events = await transaction.activityLog.allEvents();
-      final state = await transaction.runtimeState.read();
-
-      if (state.cleanShutdown) {
-        await transaction.runtimeState.save(
-          state.copyWith(cleanShutdown: false),
-        );
-        return;
-      }
-
-      final activeTask = TaskLifecycle.deriveActiveTask(events);
-      if (activeTask != null) {
-        final recoveryTimestamp =
-            state.promptState.shownAtUtc ??
-            state.lastConfirmationAtUtc ??
-            activeTask.startedAtUtc;
-        await transaction.activityLog.append(
-          ActivityLogEvent.stopTask(
-            occurredAtUtc: recoveryTimestamp,
-            source: ActivitySource.recovery,
-            createdAtUtc: nowUtc,
-          ),
-        );
-      }
-
-      await transaction.runtimeState.save(
-        state.copyWith(
-          promptState: const PromptState.none(),
-          cleanShutdown: false,
-        ),
-      );
+      final transition = (await _loadTrackingSession(
+        transaction,
+      )).recoverOnStartup(nowUtc: nowUtc);
+      await _applyTransition(transaction, transition);
     });
   }
 
@@ -238,14 +130,35 @@ final class TrackerService {
       return _transactions.run((transaction) async {
         final events = await transaction.activityLog.allEvents();
         final settings = await transaction.settings.read();
-        return AutocompleteEngine.suggestions(
-          events: events,
+        return ActivityTimeline(events).autocompleteSuggestions(
           query: query,
           nowUtc: _clock.nowUtc(),
           lookbackDays: settings.autocompleteLookbackDays,
         );
       });
     });
+  }
+
+  Future<TrackingSession> _loadTrackingSession(
+    AppTransaction transaction,
+  ) async {
+    return TrackingSession(
+      timeline: ActivityTimeline(await transaction.activityLog.allEvents()),
+      runtimeState: await transaction.runtimeState.read(),
+    );
+  }
+
+  Future<void> _applyTransition(
+    AppTransaction transaction,
+    TrackingTransition transition,
+  ) async {
+    final event = transition.eventToAppend;
+    if (event != null) {
+      await transaction.activityLog.append(event);
+    }
+    if (transition.saveRuntimeState) {
+      await transaction.runtimeState.save(transition.runtimeState);
+    }
   }
 
   Future<AppStateSnapshot> _stateChangingOperation(
@@ -293,16 +206,17 @@ final class TrackerService {
     AppTransaction transaction,
     String suggestionQuery,
   ) async {
-    final events = await transaction.activityLog.allEvents();
+    final timeline = ActivityTimeline(
+      await transaction.activityLog.allEvents(),
+    );
     final settings = await transaction.settings.read();
 
     return AppStateSnapshot(
-      activeTask: TaskLifecycle.deriveActiveTask(events),
+      activeTask: timeline.activeTask,
       runtimeState: await transaction.runtimeState.read(),
       settings: settings,
       capabilities: _capabilities,
-      recentSuggestions: AutocompleteEngine.suggestions(
-        events: events,
+      recentSuggestions: timeline.autocompleteSuggestions(
         query: suggestionQuery,
         nowUtc: _clock.nowUtc(),
         lookbackDays: settings.autocompleteLookbackDays,

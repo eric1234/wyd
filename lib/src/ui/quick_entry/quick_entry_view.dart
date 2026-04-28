@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../domain/domain.dart';
 import 'quick_entry_controller.dart';
 
-const _visibleSuggestionLimit = 5;
 const _suggestionRowHeight = 36.0;
-const _suggestionListMaxHeight = _visibleSuggestionLimit * _suggestionRowHeight;
+const _suggestionListMaxHeight =
+    defaultAutocompleteSuggestionLimit * _suggestionRowHeight;
 
 class QuickEntryView extends StatelessWidget {
   const QuickEntryView({super.key, required this.controller});
@@ -23,42 +24,6 @@ class QuickEntryView extends StatelessWidget {
             child: Card(
               margin: EdgeInsets.zero,
               child: QuickEntryPanel(controller: controller),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class QuickEntryOverlay extends StatelessWidget {
-  const QuickEntryOverlay({super.key, required this.controller});
-
-  final QuickEntryController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: Material(
-        color: Colors.black.withValues(alpha: 0.28),
-        child: Center(
-          child: Card(
-            elevation: 12,
-            margin: const EdgeInsets.all(24),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Update Task',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  QuickEntryPanel(controller: controller),
-                ],
-              ),
             ),
           ),
         ),

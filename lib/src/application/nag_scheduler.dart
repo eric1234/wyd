@@ -49,6 +49,7 @@ final class NagScheduler {
   SchedulerTimer? _reminderTimer;
   SchedulerTimer? _timeoutTimer;
   AppStateSnapshot? _snapshot;
+  int _generation = 0;
   bool _disposed = false;
 
   void update(AppStateSnapshot snapshot) {
@@ -56,18 +57,21 @@ final class NagScheduler {
       return;
     }
 
+    _generation += 1;
+    final generation = _generation;
     _snapshot = snapshot;
     _cancelTimers();
-    _scheduleFrom(snapshot);
+    _scheduleFrom(snapshot, generation);
   }
 
   void dispose() {
     _disposed = true;
+    _generation += 1;
     _snapshot = null;
     _cancelTimers();
   }
 
-  void _scheduleFrom(AppStateSnapshot snapshot) {
+  void _scheduleFrom(AppStateSnapshot snapshot, int generation) {
     final activeTask = snapshot.activeTask;
     if (activeTask == null) {
       return;
@@ -82,7 +86,7 @@ final class NagScheduler {
           _durationUntil(
             anchor.add(_minutes(snapshot.settings.reminderIntervalMinutes)),
           ),
-          () => unawaited(_handleReminderDue()),
+          () => unawaited(_handleReminderDue(generation)),
         );
       case PromptStatus.visible:
         final shownAt = snapshot.runtimeState.promptState.shownAtUtc;
@@ -93,17 +97,19 @@ final class NagScheduler {
           _durationUntil(
             shownAt.add(_minutes(snapshot.settings.responseTimeoutMinutes)),
           ),
-          () => unawaited(_handlePromptTimedOut()),
+          () => unawaited(_handlePromptTimedOut(generation)),
         );
       case PromptStatus.expired:
         return;
     }
   }
 
-  Future<void> _handleReminderDue() async {
+  Future<void> _handleReminderDue(int generation) async {
     _reminderTimer = null;
     final snapshot = _snapshot;
-    if (_disposed || snapshot == null || snapshot.activeTask == null) {
+    if (!_isCurrent(generation) ||
+        snapshot == null ||
+        snapshot.activeTask == null) {
       return;
     }
     if (snapshot.runtimeState.promptState.isPending) {
@@ -113,31 +119,39 @@ final class NagScheduler {
 
     try {
       final deferral = await _typingDeferral(snapshot);
-      if (_disposed) {
+      if (!_isCurrent(generation)) {
         return;
       }
       if (deferral != null) {
         _reminderTimer = _timerFactory.schedule(
           deferral,
-          () => unawaited(_handleReminderDue()),
+          () => unawaited(_handleReminderDue(generation)),
         );
         return;
       }
 
-      update(await _onShowPrompt());
+      final promptSnapshot = await _onShowPrompt();
+      if (!_isCurrent(generation)) {
+        return;
+      }
+      update(promptSnapshot);
     } catch (error, stackTrace) {
       _onError?.call(error, stackTrace);
     }
   }
 
-  Future<void> _handlePromptTimedOut() async {
+  Future<void> _handlePromptTimedOut(int generation) async {
     _timeoutTimer = null;
-    if (_disposed) {
+    if (!_isCurrent(generation)) {
       return;
     }
 
     try {
-      update(await _onPromptTimedOut());
+      final snapshot = await _onPromptTimedOut();
+      if (!_isCurrent(generation)) {
+        return;
+      }
+      update(snapshot);
     } catch (error, stackTrace) {
       _onError?.call(error, stackTrace);
     }
@@ -174,6 +188,10 @@ final class NagScheduler {
     _timeoutTimer?.cancel();
     _reminderTimer = null;
     _timeoutTimer = null;
+  }
+
+  bool _isCurrent(int generation) {
+    return !_disposed && generation == _generation;
   }
 
   static Duration _minutes(int value) => Duration(minutes: value);

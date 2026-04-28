@@ -36,9 +36,9 @@ void main() {
     final secondDatabase = await AppDatabase.openAtPath(databasePath);
     addTearDown(secondDatabase.close);
     final repository = SqliteActivityLogRepository(secondDatabase.database);
-    final activeTask = TaskLifecycle.deriveActiveTask(
+    final activeTask = ActivityTimeline(
       await repository.allEvents(),
-    );
+    ).activeTask;
 
     expect(activeTask, isNotNull);
     expect(activeTask!.taskText, 'Persistent task');

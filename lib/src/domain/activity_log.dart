@@ -14,18 +14,57 @@ enum ActivitySource {
 
 final class ActivityLogEvent {
   ActivityLogEvent({
+    int id = 0,
+    required DateTime occurredAtUtc,
+    required ActivityEventType eventType,
+    String? taskText,
+    String? taskTextNormalized,
+    required ActivitySource source,
+    DateTime? createdAtUtc,
+  }) : this._trusted(
+         id: id,
+         occurredAtUtc: occurredAtUtc,
+         eventType: eventType,
+         taskText: taskText,
+         taskTextNormalized:
+             taskTextNormalized ??
+             (taskText == null
+                 ? null
+                 : TaskText.normalizeForEquality(taskText)),
+         source: source,
+         createdAtUtc: createdAtUtc,
+       );
+
+  ActivityLogEvent._trusted({
     this.id = 0,
     required DateTime occurredAtUtc,
     required this.eventType,
     this.taskText,
-    String? taskTextNormalized,
+    this.taskTextNormalized,
     required this.source,
     DateTime? createdAtUtc,
   }) : occurredAtUtc = occurredAtUtc.toUtc(),
-       taskTextNormalized =
-           taskTextNormalized ??
-           (taskText == null ? null : TaskText.normalizeForEquality(taskText)),
        createdAtUtc = (createdAtUtc ?? occurredAtUtc).toUtc();
+
+  factory ActivityLogEvent.hydrate({
+    required int id,
+    required DateTime occurredAtUtc,
+    required ActivityEventType eventType,
+    required String? taskText,
+    required String? taskTextNormalized,
+    required ActivitySource source,
+    required DateTime createdAtUtc,
+  }) {
+    return ActivityLogEvent._trusted(
+      id: id,
+      occurredAtUtc: occurredAtUtc,
+      eventType: eventType,
+      taskText: taskText,
+      taskTextNormalized: taskTextNormalized,
+      source: source,
+      createdAtUtc: createdAtUtc,
+    );
+  }
 
   factory ActivityLogEvent.startTask({
     int id = 0,

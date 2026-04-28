@@ -116,6 +116,27 @@ final class AppSettings {
     );
   }
 
+  @override
+  bool operator ==(Object other) {
+    return other is AppSettings &&
+        reminderIntervalMinutes == other.reminderIntervalMinutes &&
+        autocompleteLookbackDays == other.autocompleteLookbackDays &&
+        responseTimeoutMinutes == other.responseTimeoutMinutes &&
+        typingDeferralSeconds == other.typingDeferralSeconds &&
+        startAtLogin == other.startAtLogin;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(
+      reminderIntervalMinutes,
+      autocompleteLookbackDays,
+      responseTimeoutMinutes,
+      typingDeferralSeconds,
+      startAtLogin,
+    );
+  }
+
   static void _validateRange(
     List<SettingsValidationIssue> issues, {
     required SettingsField field,

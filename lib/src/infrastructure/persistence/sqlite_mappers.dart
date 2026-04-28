@@ -35,7 +35,7 @@ Map<String, Object?> activityEventToRow(ActivityLogEvent event) {
 }
 
 ActivityLogEvent activityEventFromRow(Map<String, Object?> row) {
-  return ActivityLogEvent(
+  return ActivityLogEvent.hydrate(
     id: row['id'] as int,
     occurredAtUtc: parseUtc(row['occurred_at_utc']),
     eventType: activityEventTypeFromStorage(row['event_type'] as String),

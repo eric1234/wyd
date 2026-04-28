@@ -2,17 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/domain/domain.dart';
 
 void main() {
-  group('TaskLifecycle', () {
+  group('ActivityTimeline lifecycle', () {
     test('starts a task when idle', () {
       final occurredAt = DateTime.utc(2026, 1, 1, 9);
-      final decision = TaskLifecycle.submitTask(
-        events: const [],
-        taskText: ' Write docs ',
-        occurredAtUtc: occurredAt,
-        id: 1,
-      );
+      final decision = ActivityTimeline(
+        const [],
+      ).submitTask(taskText: ' Write docs ', occurredAtUtc: occurredAt, id: 1);
 
-      expect(decision.action, SubmitTaskAction.start);
+      expect(decision, isA<TaskStarted>());
       expect(decision.appendsActivityRow, isTrue);
       expect(decision.event!.eventType, ActivityEventType.startTask);
       expect(decision.event!.taskText, 'Write docs');
@@ -29,13 +26,12 @@ void main() {
         ),
       ];
 
-      final decision = TaskLifecycle.submitTask(
-        events: events,
+      final decision = ActivityTimeline(events).submitTask(
         taskText: 'write\tdocs',
         occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 15),
       );
 
-      expect(decision.action, SubmitTaskAction.confirm);
+      expect(decision, isA<TaskConfirmed>());
       expect(decision.appendsActivityRow, isFalse);
       expect(decision.event, isNull);
     });
@@ -49,14 +45,13 @@ void main() {
         ),
       ];
 
-      final decision = TaskLifecycle.submitTask(
-        events: events,
+      final decision = ActivityTimeline(events).submitTask(
         taskText: 'Fix bug',
         occurredAtUtc: DateTime.utc(2026, 1, 1, 10),
         id: 2,
       );
 
-      expect(decision.action, SubmitTaskAction.switchTask);
+      expect(decision, isA<TaskSwitched>());
       expect(decision.event!.eventType, ActivityEventType.switchTask);
       expect(decision.event!.taskText, 'Fix bug');
       expect(decision.event!.source, ActivitySource.manualSubmit);
@@ -71,23 +66,22 @@ void main() {
         ),
       ];
 
-      final activeDecision = TaskLifecycle.stopTask(
-        events: events,
+      final activeDecision = ActivityTimeline(events).stopTask(
         occurredAtUtc: DateTime.utc(2026, 1, 1, 10),
         source: ActivitySource.manualStop,
         id: 2,
       );
-      final idleDecision = TaskLifecycle.stopTask(
-        events: [...events, activeDecision.event!],
-        occurredAtUtc: DateTime.utc(2026, 1, 1, 11),
-        source: ActivitySource.manualStop,
-        id: 3,
-      );
+      final idleDecision = ActivityTimeline([...events, activeDecision.event!])
+          .stopTask(
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 11),
+            source: ActivitySource.manualStop,
+            id: 3,
+          );
 
-      expect(activeDecision.action, StopTaskAction.appendStop);
+      expect(activeDecision, isA<TaskStopped>());
       expect(activeDecision.event!.eventType, ActivityEventType.stopTask);
       expect(activeDecision.event!.source, ActivitySource.manualStop);
-      expect(idleDecision.action, StopTaskAction.noOp);
+      expect(idleDecision, isA<NoActiveTaskToStop>());
       expect(idleDecision.event, isNull);
     });
 
@@ -101,8 +95,7 @@ void main() {
         ),
       ];
 
-      final decision = TaskLifecycle.stopTask(
-        events: events,
+      final decision = ActivityTimeline(events).stopTask(
         occurredAtUtc: promptShownAt,
         source: ActivitySource.nagTimeout,
         id: 2,
@@ -121,8 +114,7 @@ void main() {
         ),
       ];
 
-      final decision = TaskLifecycle.stopTask(
-        events: events,
+      final decision = ActivityTimeline(events).stopTask(
         occurredAtUtc: DateTime.utc(2026, 1, 1, 10),
         source: ActivitySource.exit,
       );
@@ -150,7 +142,7 @@ void main() {
         ),
       ];
 
-      final activeTask = TaskLifecycle.deriveActiveTask(events);
+      final activeTask = ActivityTimeline(events).activeTask;
 
       expect(activeTask, isNotNull);
       expect(activeTask!.taskText, 'Fix bug');

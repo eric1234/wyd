@@ -28,11 +28,9 @@ final class ReportService implements DailyReportLoader {
   Future<DailyReport> loadDailyReport(DateTime localDate) {
     return _transactions.run((transaction) async {
       final events = await transaction.activityLog.allEvents();
-      return ReportDeriver.buildDailyReport(
-        events: events,
-        localDate: localDate,
-        nowUtc: _clock.nowUtc(),
-      );
+      return ActivityTimeline(
+        events,
+      ).buildDailyReport(localDate: localDate, nowUtc: _clock.nowUtc());
     });
   }
 }

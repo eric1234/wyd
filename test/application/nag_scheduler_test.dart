@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/domain/domain.dart';
@@ -206,6 +208,60 @@ void main() {
       expect(harness.showPromptCalls, 1);
     });
 
+    test('ignores obsolete reminder after typing check awaits', () async {
+      final typingDetector = _DelayedTypingActivityDetector();
+      final harness = _Harness(typingDetector: typingDetector);
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          capabilities: const PlatformCapabilities(
+            supportsTypingActivity: true,
+          ),
+        ),
+      );
+      final firing = harness.timers.fireFirst();
+      await typingDetector.waitForRequest();
+
+      harness.scheduler.update(harness.snapshot(activeTask: null));
+      typingDetector.complete(DateTime.utc(2026, 1, 1, 9, 15));
+      await firing;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(harness.showPromptCalls, 0);
+      expect(harness.timers.activeTimers, isEmpty);
+    });
+
+    test('ignores obsolete prompt result after snapshot changes', () async {
+      final harness = _Harness();
+      final promptCompleter = Completer<AppStateSnapshot>();
+      harness.onShowPrompt = () => promptCompleter.future;
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+        ),
+      );
+      final firing = harness.timers.fireFirst();
+      await Future<void>.delayed(Duration.zero);
+
+      harness.scheduler.update(harness.snapshot(activeTask: null));
+      promptCompleter.complete(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          runtimeState: RuntimeState(
+            promptState: PromptState.visible(harness.clock.current),
+          ),
+        ),
+      );
+      await firing;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(harness.showPromptCalls, 1);
+      expect(harness.timers.activeTimers, isEmpty);
+    });
+
     test('show prompt errors are reported and leave no active timer', () async {
       final harness = _Harness();
       harness.onShowPrompt = () async => throw StateError('show failed');
@@ -323,6 +379,25 @@ final class _FakeTypingActivityDetector implements TypingActivityDetector {
 
   @override
   Future<DateTime?> lastTypingActivityUtc() async => lastTypingAt;
+}
+
+final class _DelayedTypingActivityDetector implements TypingActivityDetector {
+  final Completer<void> _requestCompleter = Completer<void>();
+  final Completer<DateTime?> _resultCompleter = Completer<DateTime?>();
+
+  @override
+  Future<DateTime?> lastTypingActivityUtc() {
+    if (!_requestCompleter.isCompleted) {
+      _requestCompleter.complete();
+    }
+    return _resultCompleter.future;
+  }
+
+  Future<void> waitForRequest() => _requestCompleter.future;
+
+  void complete(DateTime? lastTypingAt) {
+    _resultCompleter.complete(lastTypingAt);
+  }
 }
 
 final class _FakeSchedulerTimerFactory implements SchedulerTimerFactory {

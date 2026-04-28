@@ -58,18 +58,11 @@ final class WydAppController extends ChangeNotifier {
 
   AppStateSnapshot? _snapshot;
   WindowRole? _activeRole;
-  WindowRole? _quickEntryOverlayBaseRole;
   String? _startupError;
   bool _initialized = false;
 
   AppStateSnapshot? get snapshot => _snapshot;
   WindowRole? get activeRole => _activeRole;
-  bool get quickEntryOverlayVisible {
-    return quickEntry.state.isOpen &&
-        _quickEntryOverlayBaseRole != null &&
-        _activeRole == _quickEntryOverlayBaseRole;
-  }
-
   String? get startupError => _startupError;
   bool get initialized => _initialized;
 
@@ -119,7 +112,6 @@ final class WydAppController extends ChangeNotifier {
     _snapshot = latestSnapshot;
     await quickEntry.open(latestSnapshot);
 
-    _quickEntryOverlayBaseRole = null;
     _activeRole = WindowRole.quickEntry;
     notifyListeners();
     await _windowCoordinator.openOrFocus(
@@ -145,7 +137,6 @@ final class WydAppController extends ChangeNotifier {
     );
     _snapshot = latestSnapshot;
     final shouldCloseQuickEntryWindow = _activeRole == WindowRole.quickEntry;
-    _quickEntryOverlayBaseRole = null;
     quickEntry.close();
     if (shouldCloseQuickEntryWindow) {
       await _windowCoordinator.close(WindowRole.quickEntry);
@@ -173,7 +164,6 @@ final class WydAppController extends ChangeNotifier {
     );
     _snapshot = latestSnapshot;
     final shouldCloseQuickEntryWindow = _activeRole == WindowRole.quickEntry;
-    _quickEntryOverlayBaseRole = null;
     quickEntry.close();
     if (shouldCloseQuickEntryWindow) {
       await _windowCoordinator.close(WindowRole.quickEntry);
@@ -194,7 +184,6 @@ final class WydAppController extends ChangeNotifier {
   Future<void> handleWindowClosed(WindowRole role) async {
     switch (role) {
       case WindowRole.quickEntry:
-        _quickEntryOverlayBaseRole = null;
         if (_activeRole == WindowRole.quickEntry) {
           _activeRole = null;
         }
@@ -220,7 +209,6 @@ final class WydAppController extends ChangeNotifier {
     _nagScheduler?.update(latestSnapshot);
     quickEntry.close();
     _activeRole = null;
-    _quickEntryOverlayBaseRole = null;
     await _bestEffortExitCleanup();
     await _onExit();
   }
@@ -241,7 +229,6 @@ final class WydAppController extends ChangeNotifier {
 
   Future<void> _quickEntrySubmitted(AppStateSnapshot snapshot) async {
     _snapshot = snapshot;
-    _quickEntryOverlayBaseRole = null;
     _activeRole = null;
     await _windowCoordinator.close(WindowRole.quickEntry);
     await _refreshTrayMenu(snapshot);

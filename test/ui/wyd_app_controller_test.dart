@@ -207,7 +207,6 @@ void main() {
       await harness.controller.showNagPrompt();
 
       expect(harness.controller.activeRole, WindowRole.quickEntry);
-      expect(harness.controller.quickEntryOverlayVisible, isFalse);
       expect(harness.controller.quickEntry.state.isOpen, isTrue);
       expect(harness.window.openedRoles, [
         WindowRole.report,
@@ -260,7 +259,6 @@ void main() {
       await harness.controller.showNagPrompt();
 
       expect(harness.controller.activeRole, WindowRole.quickEntry);
-      expect(harness.controller.quickEntryOverlayVisible, isFalse);
       expect(harness.window.openedRoles.last, WindowRole.quickEntry);
       expect(harness.exitRequests(), 0);
     });
@@ -310,7 +308,6 @@ void main() {
           ActivityEventType.switchTask,
         ]);
         expect(harness.controller.activeRole, isNull);
-        expect(harness.controller.quickEntryOverlayVisible, isFalse);
         expect(harness.window.closedRoles, contains(WindowRole.quickEntry));
       },
     );

@@ -14,6 +14,28 @@ final class PlatformCapabilities {
   final bool supportsPowerEvents;
   final bool supportsTrayClickActions;
   final bool supportsTrayRelativePositioning;
+
+  @override
+  bool operator ==(Object other) {
+    return other is PlatformCapabilities &&
+        supportsTypingActivity == other.supportsTypingActivity &&
+        supportsStartAtLogin == other.supportsStartAtLogin &&
+        supportsPowerEvents == other.supportsPowerEvents &&
+        supportsTrayClickActions == other.supportsTrayClickActions &&
+        supportsTrayRelativePositioning ==
+            other.supportsTrayRelativePositioning;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(
+      supportsTypingActivity,
+      supportsStartAtLogin,
+      supportsPowerEvents,
+      supportsTrayClickActions,
+      supportsTrayRelativePositioning,
+    );
+  }
 }
 
 final class AppStateSnapshot {

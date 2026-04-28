@@ -146,6 +146,17 @@ Hidden=true
       );
     });
 
+    test('rejects unsafe desktop ids', () {
+      expect(
+        () => XdgAutostartStartupAtLoginAdapter(appId: '../wyd'),
+        throwsArgumentError,
+      );
+      expect(
+        () => XdgAutostartStartupAtLoginAdapter(appId: 'dev/wyd'),
+        throwsArgumentError,
+      );
+    });
+
     test('treats GNOME disabled desktop entry as disabled', () async {
       final tempDirectory = await Directory.systemTemp.createTemp(
         'wyd_autostart_',

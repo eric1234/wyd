@@ -147,6 +147,33 @@ void main() {
       expect(controller.state.isOpen, isFalse);
       expect(controller.state.suggestions, isEmpty);
     });
+
+    test(
+      'submits raw text while replacement suggestions are pending',
+      () async {
+        final client = _DelayedQuickEntryClient();
+        final controller = _controller(client);
+        await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+
+        final firstUpdate = controller.updateText('old');
+        await client.waitForRequests(1);
+        client.completeRequest(0, [_suggestion('Old suggestion')]);
+        await firstUpdate;
+        expect(
+          controller.state.highlightedSuggestion!.taskText,
+          'Old suggestion',
+        );
+
+        final secondUpdate = controller.updateText('New raw task');
+        await client.waitForRequests(2);
+
+        await controller.submit();
+
+        expect(client.submittedTexts, ['New raw task']);
+        client.completeRequest(1, [_suggestion('New suggestion')]);
+        await secondUpdate;
+      },
+    );
   });
 }
 

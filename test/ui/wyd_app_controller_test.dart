@@ -32,8 +32,12 @@ void main() {
       await harness.controller.initialize();
 
       expect(harness.controller.startupError, contains('tray unavailable'));
-      expect(harness.controller.activeRole, WindowRole.settings);
-      expect(harness.window.openedRoles, contains(WindowRole.settings));
+      expect(harness.controller.activeRole, WindowRole.quickEntry);
+      expect(harness.window.openedRoles, contains(WindowRole.quickEntry));
+      expect(
+        harness.window.openedConfigurations.last.title,
+        'wyd startup error',
+      );
     });
 
     test('opens quick entry through controller and submits a task', () async {
@@ -167,6 +171,28 @@ void main() {
         );
       },
     );
+
+    test('failed quick-entry show does not persist a phantom prompt', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+      await harness.controller.openQuickEntry();
+      await harness.controller.quickEntry.updateText('Write docs');
+      await harness.controller.quickEntry.submit();
+      harness.window.failingOpenRoles.add(WindowRole.quickEntry);
+
+      await expectLater(
+        () => harness.controller.openQuickEntry(),
+        throwsStateError,
+      );
+
+      final runtimeState = await SqliteRuntimeStateRepository(
+        harness.database.database,
+      ).read();
+      expect(runtimeState.promptState.status, PromptStatus.none);
+      expect(harness.controller.quickEntry.state.isOpen, isFalse);
+      expect(harness.controller.activeRole, isNull);
+    });
 
     test(
       'scheduled timeout auto-stops task and keeps quick entry open',
@@ -419,6 +445,8 @@ final class _Harness {
             typingActivityDetector: const UnsupportedTypingActivityDetector(),
             onShowPrompt: () => controller.showNagPrompt(),
             onPromptTimedOut: () => controller.nagPromptTimedOut(),
+            onError: (error, stackTrace) =>
+                unawaited(controller.handleRuntimeError(error, stackTrace)),
           )
         : null;
     controller = WydAppController(
@@ -566,6 +594,7 @@ final class _FakeTrayAdapter implements TrayAdapter {
 
 final class _FakeWindowAdapter implements WindowAdapter {
   final Map<WindowRole, WindowHandle> handles = {};
+  final Set<WindowRole> failingOpenRoles = {};
   final List<WindowRoleConfiguration> openedConfigurations = [];
   final List<WindowRole> openedRoles = [];
   final List<WindowRole> preloadedRoles = [];
@@ -580,6 +609,9 @@ final class _FakeWindowAdapter implements WindowAdapter {
 
   @override
   Future<WindowHandle> open(WindowRoleConfiguration configuration) async {
+    if (failingOpenRoles.contains(configuration.role)) {
+      throw StateError('window open failed');
+    }
     openedConfigurations.add(configuration);
     openedRoles.add(configuration.role);
     final handle = WindowHandle(configuration.role.name);

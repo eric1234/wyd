@@ -18,11 +18,12 @@ final class DesktopPlatformBindings {
   factory DesktopPlatformBindings.forPlatform({
     required bool isLinux,
     StartupAtLoginAdapter Function()? linuxStartupAtLoginFactory,
+    bool? supportsTrayClickActions,
   }) {
     return DesktopPlatformBindings(
       capabilities: PlatformCapabilities(
         supportsStartAtLogin: isLinux,
-        supportsTrayClickActions: true,
+        supportsTrayClickActions: supportsTrayClickActions ?? isLinux,
       ),
       startupAtLoginAdapter: isLinux
           ? (linuxStartupAtLoginFactory?.call() ??

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../application/application.dart';
@@ -34,6 +36,7 @@ final class ReportState {
     DateTime? selectedDate,
     DateTime? today,
     DailyReport? report,
+    bool clearReport = false,
     bool? loading,
     String? errorMessage,
     bool clearErrorMessage = false,
@@ -42,7 +45,7 @@ final class ReportState {
     return ReportState(
       selectedDate: selectedDate ?? this.selectedDate,
       today: today ?? this.today,
-      report: report ?? this.report,
+      report: clearReport ? null : report ?? this.report,
       loading: loading ?? this.loading,
       errorMessage: clearErrorMessage
           ? null
@@ -68,6 +71,11 @@ final class ReportController extends ChangeNotifier {
     await loadDate(_service.todayLocalDate(), isOpen: true);
   }
 
+  void refreshForShow() {
+    final selected = _state.selectedDate ?? _service.todayLocalDate();
+    unawaited(loadDate(selected, isOpen: true, clearReport: true));
+  }
+
   void close() {
     _setState(_state.copyWith(isOpen: false));
   }
@@ -86,7 +94,11 @@ final class ReportController extends ChangeNotifier {
     await loadDate(DateTime(selected.year, selected.month, selected.day + 1));
   }
 
-  Future<void> loadDate(DateTime localDate, {bool? isOpen}) async {
+  Future<void> loadDate(
+    DateTime localDate, {
+    bool? isOpen,
+    bool clearReport = false,
+  }) async {
     final today = _service.todayLocalDate();
     final normalizedDate = DateTime(
       localDate.year,
@@ -103,6 +115,7 @@ final class ReportController extends ChangeNotifier {
         today: today,
         loading: true,
         clearErrorMessage: true,
+        clearReport: clearReport,
         isOpen: isOpen,
       ),
     );

@@ -13,7 +13,7 @@ flutter doctor
 flutter config --enable-linux-desktop
 ```
 
-Use `--enable-macos-desktop` or `--enable-windows-desktop` when developing on those platforms.
+macOS and Windows runners are present from Flutter's project template, but the product currently gates the tray app to Linux while those platforms wait for later tray-first lifecycle work.
 
 3. On Debian/Ubuntu Linux development machines, install the desktop build dependencies used by Flutter, the tray plugin, and SQLite native assets:
 
@@ -57,11 +57,9 @@ Run integration tests through the project script instead of invoking the `integr
 ./tool/run_integration_tests.sh linux
 ```
 
-The script accepts any Flutter device ID and runs each `integration_test/*_test.dart` file in a separate Flutter process:
+The script accepts a Flutter device ID and runs each `integration_test/*_test.dart` file in a separate Flutter process. Linux is the supported v1 target:
 
 ```bash
-./tool/run_integration_tests.sh macos
-./tool/run_integration_tests.sh windows
 WYD_INTEGRATION_DEVICE=linux ./tool/run_integration_tests.sh
 ```
 
@@ -71,7 +69,7 @@ This per-file runner is the standard project workflow for all platforms. It avoi
 
 Linux currently supports the required tray workflow, local SQLite persistence, hidden startup, single-instance activation routing, quick entry, nag timeout, reports, settings, recovery, and XDG autostart-based start-at-login.
 
-The current Linux implementation uses one managed Flutter window and switches it between user-opened quick-entry, report, settings, and error roles. Scheduler nags preserve an open report/settings role by rendering quick entry as an overlay, so a due prompt does not replace the report/settings view. The application-layer `WindowCoordinator` keeps role behavior isolated so a future true multi-window adapter can replace this fallback without changing domain or persistence code.
+The current Linux implementation uses the primary Flutter window for quick entry and separate warmed child windows for report/settings. The child windows are preloaded hidden so first visible use is responsive, then report/settings data is refreshed when the warmed window is actually shown.
 
 The following optional capabilities are intentionally disabled unless a reliable platform adapter is added for the target session:
 

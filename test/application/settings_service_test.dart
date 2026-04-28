@@ -115,29 +115,50 @@ void main() {
       },
     );
 
-    test('reverts start-at-login when settings persistence fails', () async {
-      final runner = _FailingSettingsSaveRunner();
-      final trackerService = TrackerService(
-        transactions: runner,
-        clock: _FakeClock(DateTime.utc(2026, 1, 1, 9)),
+    test(
+      'does not change start-at-login when settings persistence fails',
+      () async {
+        final runner = _FailingSettingsSaveRunner();
+        final trackerService = TrackerService(
+          transactions: runner,
+          clock: _FakeClock(DateTime.utc(2026, 1, 1, 9)),
+          capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
+        );
+        final startupAtLogin = _FakeStartupAtLoginAdapter();
+        final service = SettingsService(
+          trackerService: trackerService,
+          startupAtLoginAdapter: startupAtLogin,
+        );
+
+        await expectLater(
+          () => service.saveSettings(const AppSettings(startAtLogin: true)),
+          throwsStateError,
+        );
+
+        expect(startupAtLogin.enabledValues, isEmpty);
+        expect(
+          (await trackerService.loadSnapshot()).settings.startAtLogin,
+          isFalse,
+        );
+      },
+    );
+
+    test('reconciles start-at-login from persisted settings', () async {
+      final harness = await _Harness.create(
         capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
       );
-      final startupAtLogin = _FakeStartupAtLoginAdapter();
+      addTearDown(harness.dispose);
       final service = SettingsService(
-        trackerService: trackerService,
-        startupAtLoginAdapter: startupAtLogin,
+        trackerService: harness.trackerService,
+        startupAtLoginAdapter: harness.startupAtLogin,
+      );
+      final snapshot = await harness.trackerService.updateSettings(
+        const AppSettings(startAtLogin: true),
       );
 
-      await expectLater(
-        () => service.saveSettings(const AppSettings(startAtLogin: true)),
-        throwsStateError,
-      );
+      await service.reconcileStartAtLogin(snapshot);
 
-      expect(startupAtLogin.enabledValues, [true, false]);
-      expect(
-        (await trackerService.loadSnapshot()).settings.startAtLogin,
-        isFalse,
-      );
+      expect(harness.startupAtLogin.enabledValues, [true]);
     });
   });
 }
@@ -234,6 +255,15 @@ final class _EmptyActivityLogRepository implements ActivityLogRepository {
 
   @override
   Future<List<ActivityLogEvent>> allEvents() async => const [];
+
+  @override
+  Future<ActivityLogEvent?> latestEvent() async => null;
+
+  @override
+  Future<List<ActivityLogEvent>> taskEventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  }) async => const [];
 }
 
 final class _MemoryRuntimeStateRepository implements RuntimeStateRepository {

@@ -4,6 +4,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../../domain/domain.dart';
+
 final class AppDatabase {
   AppDatabase._(this.database);
 
@@ -129,7 +131,8 @@ CREATE TABLE app_state (
   last_confirmation_at_utc TEXT,
   pending_prompt_shown_at_utc TEXT,
   pending_prompt_expired INTEGER NOT NULL DEFAULT 0 CHECK(pending_prompt_expired IN (0, 1)),
-  clean_shutdown INTEGER NOT NULL DEFAULT 1 CHECK(clean_shutdown IN (0, 1))
+  clean_shutdown INTEGER NOT NULL DEFAULT 1 CHECK(clean_shutdown IN (0, 1)),
+  CHECK (pending_prompt_expired = 0 OR pending_prompt_shown_at_utc IS NOT NULL)
 )
 ''');
 
@@ -142,11 +145,12 @@ CREATE TABLE app_state (
     await database.execute('''
 CREATE TABLE settings (
   id INTEGER PRIMARY KEY CHECK(id = 1),
-  reminder_interval_minutes INTEGER NOT NULL,
-  autocomplete_lookback_days INTEGER NOT NULL,
-  response_timeout_minutes INTEGER NOT NULL,
-  typing_deferral_seconds INTEGER NOT NULL,
-  start_at_login INTEGER NOT NULL CHECK(start_at_login IN (0, 1))
+  reminder_interval_minutes INTEGER NOT NULL CHECK(reminder_interval_minutes BETWEEN ${AppSettings.minReminderIntervalMinutes} AND ${AppSettings.maxReminderIntervalMinutes}),
+  autocomplete_lookback_days INTEGER NOT NULL CHECK(autocomplete_lookback_days BETWEEN ${AppSettings.minAutocompleteLookbackDays} AND ${AppSettings.maxAutocompleteLookbackDays}),
+  response_timeout_minutes INTEGER NOT NULL CHECK(response_timeout_minutes BETWEEN ${AppSettings.minResponseTimeoutMinutes} AND ${AppSettings.maxResponseTimeoutMinutes}),
+  typing_deferral_seconds INTEGER NOT NULL CHECK(typing_deferral_seconds BETWEEN ${AppSettings.minTypingDeferralSeconds} AND ${AppSettings.maxTypingDeferralSeconds}),
+  start_at_login INTEGER NOT NULL CHECK(start_at_login IN (0, 1)),
+  CHECK (reminder_interval_minutes >= response_timeout_minutes)
 )
 ''');
   }

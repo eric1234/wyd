@@ -564,6 +564,27 @@ final class _MemoryActivityLogRepository implements ActivityLogRepository {
   Future<List<ActivityLogEvent>> allEvents() async {
     return orderActivityEvents(_store.events);
   }
+
+  @override
+  Future<ActivityLogEvent?> latestEvent() async {
+    final events = orderActivityEvents(_store.events);
+    return events.isEmpty ? null : events.last;
+  }
+
+  @override
+  Future<List<ActivityLogEvent>> taskEventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  }) async {
+    return orderActivityEvents(_store.events)
+        .where(
+          (event) =>
+              event.opensTask &&
+              !event.occurredAtUtc.isBefore(fromUtc.toUtc()) &&
+              !event.occurredAtUtc.isAfter(throughUtc.toUtc()),
+        )
+        .toList();
+  }
 }
 
 final class _MemoryRuntimeStateRepository implements RuntimeStateRepository {

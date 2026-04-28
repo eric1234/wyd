@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../application/application.dart';
@@ -103,8 +105,8 @@ final class SettingsController extends ChangeNotifier {
 
   SettingsState get state => _state;
 
-  Future<void> open() async {
-    if (_state.isOpen && !_state.loading) {
+  Future<void> open({bool forceReload = false}) async {
+    if (_state.isOpen && !_state.loading && !forceReload) {
       return;
     }
 
@@ -133,6 +135,15 @@ final class SettingsController extends ChangeNotifier {
         ),
       );
     }
+  }
+
+  void refreshForShow() {
+    if (_state.dirty || _saveQueueFuture != null) {
+      _setState(_state.copyWith(isOpen: true));
+      return;
+    }
+
+    unawaited(open(forceReload: true));
   }
 
   Future<void> close() async {

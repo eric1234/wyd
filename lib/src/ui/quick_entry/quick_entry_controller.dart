@@ -136,6 +136,8 @@ final class QuickEntryController extends ChangeNotifier {
     _setState(
       _state.copyWith(
         text: text,
+        suggestions: const [],
+        clearHighlightedIndex: true,
         selectAllOnOpen: false,
         clearValidationMessage: true,
       ),

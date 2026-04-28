@@ -35,6 +35,26 @@ void main() {
 
       expect(calls, 0);
     });
+
+    test('consumes pending native activation during initialization', () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'consumePendingActivation') {
+          return true;
+        }
+        return null;
+      });
+      final adapter = MethodChannelSingleInstanceAdapter(channel: channel);
+      var calls = 0;
+
+      await adapter.initialize(() async {
+        calls += 1;
+      });
+
+      expect(calls, 1);
+    });
   });
 }
 

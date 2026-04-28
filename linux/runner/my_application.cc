@@ -15,15 +15,38 @@ struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   FlMethodChannel* single_instance_channel;
+  gboolean pending_second_instance_activation;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static void single_instance_method_call_cb(FlMethodChannel* channel,
+                                           FlMethodCall* method_call,
+                                           gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  const gchar* method = fl_method_call_get_name(method_call);
+
+  if (g_strcmp0(method, "consumePendingActivation") == 0) {
+    gboolean pending = self->pending_second_instance_activation;
+    self->pending_second_instance_activation = FALSE;
+    g_autoptr(FlValue) result = fl_value_new_bool(pending);
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  fl_method_call_respond(method_call, response, nullptr);
+}
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
 
   if (gtk_application_get_windows(GTK_APPLICATION(application)) != nullptr) {
+    self->pending_second_instance_activation = TRUE;
     if (self->single_instance_channel != nullptr) {
       fl_method_channel_invoke_method(self->single_instance_channel,
                                       "secondInstanceActivated", nullptr,
@@ -124,6 +147,9 @@ static void my_application_activate(GApplication* application) {
   self->single_instance_channel = fl_method_channel_new(
       fl_engine_get_binary_messenger(fl_view_get_engine(view)),
       "dev.wyd.tracker/single_instance", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->single_instance_channel,
+                                            single_instance_method_call_cb,
+                                            self, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

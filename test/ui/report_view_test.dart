@@ -108,6 +108,42 @@ void main() {
       await _disposeWidgetHarness(tester, controller);
     }
   });
+
+  test('refreshForShow reloads a fresh report snapshot', () async {
+    final loader = _FakeReportLoader(
+      report: DailyReport(
+        localDate: DateTime(2026, 1, 2),
+        totalDuration: const Duration(minutes: 30),
+        rows: const [
+          ReportRow(
+            taskText: 'Old task',
+            taskTextNormalized: 'old task',
+            duration: Duration(minutes: 30),
+          ),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+    loader.report = DailyReport(
+      localDate: DateTime(2026, 1, 2),
+      totalDuration: const Duration(minutes: 45),
+      rows: const [
+        ReportRow(
+          taskText: 'Fresh task',
+          taskTextNormalized: 'fresh task',
+          duration: Duration(minutes: 45),
+        ),
+      ],
+    );
+
+    controller.refreshForShow();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state.report!.rows.single.taskText, 'Fresh task');
+    expect(controller.state.report!.totalDuration, const Duration(minutes: 45));
+    controller.dispose();
+  });
 }
 
 Future<void> _disposeWidgetHarness(
@@ -121,8 +157,8 @@ Future<void> _disposeWidgetHarness(
 final class _FakeReportLoader implements DailyReportLoader {
   _FakeReportLoader({this.report, this.error});
 
-  final DailyReport? report;
-  final Object? error;
+  DailyReport? report;
+  Object? error;
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);

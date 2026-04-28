@@ -128,11 +128,17 @@ final class TrackerService {
   Future<List<AutocompleteSuggestion>> autocompleteSuggestions(String query) {
     return _singleWriter.run(() async {
       return _transactions.run((transaction) async {
-        final events = await transaction.activityLog.allEvents();
         final settings = await transaction.settings.read();
+        final nowUtc = _clock.nowUtc();
+        final events = await transaction.activityLog.taskEventsBetween(
+          fromUtc: nowUtc.subtract(
+            Duration(days: settings.autocompleteLookbackDays),
+          ),
+          throughUtc: nowUtc,
+        );
         return ActivityTimeline(events).autocompleteSuggestions(
           query: query,
-          nowUtc: _clock.nowUtc(),
+          nowUtc: nowUtc,
           lookbackDays: settings.autocompleteLookbackDays,
         );
       });
@@ -206,21 +212,36 @@ final class TrackerService {
     AppTransaction transaction,
     String suggestionQuery,
   ) async {
-    final timeline = ActivityTimeline(
-      await transaction.activityLog.allEvents(),
-    );
     final settings = await transaction.settings.read();
+    final nowUtc = _clock.nowUtc();
+    final recentTaskEvents = await transaction.activityLog.taskEventsBetween(
+      fromUtc: nowUtc.subtract(
+        Duration(days: settings.autocompleteLookbackDays),
+      ),
+      throughUtc: nowUtc,
+    );
 
     return AppStateSnapshot(
-      activeTask: timeline.activeTask,
+      activeTask: _activeTaskFromLatestEvent(
+        await transaction.activityLog.latestEvent(),
+      ),
       runtimeState: await transaction.runtimeState.read(),
       settings: settings,
       capabilities: _capabilities,
-      recentSuggestions: timeline.autocompleteSuggestions(
-        query: suggestionQuery,
-        nowUtc: _clock.nowUtc(),
-        lookbackDays: settings.autocompleteLookbackDays,
-      ),
+      recentSuggestions: ActivityTimeline(recentTaskEvents)
+          .autocompleteSuggestions(
+            query: suggestionQuery,
+            nowUtc: nowUtc,
+            lookbackDays: settings.autocompleteLookbackDays,
+          ),
     );
+  }
+
+  ActiveTask? _activeTaskFromLatestEvent(ActivityLogEvent? event) {
+    if (event == null || !event.opensTask || !event.hasTaskText) {
+      return null;
+    }
+
+    return ActiveTask.fromEvent(event);
   }
 }

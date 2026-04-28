@@ -25,6 +25,7 @@ void main() {
       final bindings = DesktopPlatformBindings.forPlatform(isLinux: false);
 
       expect(bindings.capabilities.supportsStartAtLogin, isFalse);
+      expect(bindings.capabilities.supportsTrayClickActions, isFalse);
       expect(
         bindings.startupAtLoginAdapter,
         isA<UnsupportedStartupAtLoginAdapter>(),

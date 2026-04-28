@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../application/application.dart';
@@ -64,6 +66,26 @@ class WydChildWindowApp extends StatelessWidget {
           message: 'Quick entry is managed by the tray process.',
         ),
       },
+    );
+  }
+}
+
+class WydFatalStartupApp extends StatelessWidget {
+  const WydFatalStartupApp({
+    super.key,
+    required this.message,
+    required this.onExit,
+  });
+
+  final String message;
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'wyd',
+      theme: buildWydTheme(),
+      home: _StartupErrorPage(message: message, onExit: onExit),
     );
   }
 }
@@ -158,7 +180,18 @@ class WydRolePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final startupError = controller.startupError;
     if (startupError != null) {
-      return _StartupErrorPage(message: startupError);
+      return _StartupErrorPage(
+        message: startupError,
+        onExit: () => unawaited(controller.exitAfterStartupError()),
+      );
+    }
+
+    final runtimeError = controller.runtimeErrorMessage;
+    if (runtimeError != null) {
+      return _RuntimeErrorPage(
+        message: runtimeError,
+        onDismiss: () => unawaited(controller.dismissRuntimeError()),
+      );
     }
 
     final page = switch (controller.activeRole) {
@@ -218,9 +251,10 @@ class _PlaceholderRolePage extends StatelessWidget {
 }
 
 class _StartupErrorPage extends StatelessWidget {
-  const _StartupErrorPage({required this.message});
+  const _StartupErrorPage({required this.message, required this.onExit});
 
   final String message;
+  final VoidCallback onExit;
 
   @override
   Widget build(BuildContext context) {
@@ -241,6 +275,56 @@ class _StartupErrorPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(message),
+                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: onExit,
+                    child: const Text('Exit'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RuntimeErrorPage extends StatelessWidget {
+  const _RuntimeErrorPage({required this.message, required this.onDismiss});
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('wyd error')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Operation failed',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Text(message),
+                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: onDismiss,
+                    child: const Text('Dismiss'),
+                  ),
+                ),
               ],
             ),
           ),

@@ -156,6 +156,13 @@ void main() {
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       });
       await expectConstraintFailure(() async {
+        await database.database.insert('app_state', {
+          'id': 1,
+          'pending_prompt_expired': 1,
+          'clean_shutdown': 1,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      });
+      await expectConstraintFailure(() async {
         await database.database.insert('settings', {
           'id': 1,
           'reminder_interval_minutes': 15,
@@ -163,6 +170,26 @@ void main() {
           'response_timeout_minutes': 1,
           'typing_deferral_seconds': 5,
           'start_at_login': 2,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('settings', {
+          'id': 1,
+          'reminder_interval_minutes': 1,
+          'autocomplete_lookback_days': 3,
+          'response_timeout_minutes': 2,
+          'typing_deferral_seconds': 5,
+          'start_at_login': 0,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('settings', {
+          'id': 1,
+          'reminder_interval_minutes': 15,
+          'autocomplete_lookback_days': 31,
+          'response_timeout_minutes': 1,
+          'typing_deferral_seconds': 5,
+          'start_at_login': 0,
         });
       });
     });
@@ -308,6 +335,35 @@ void main() {
         expect(activeTask!.taskText, 'Fix bug');
       },
     );
+
+    test('reads latest event and bounded task events', () async {
+      await repository.append(
+        ActivityLogEvent.startTask(
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9),
+          taskText: 'Old task',
+        ),
+      );
+      await repository.append(
+        ActivityLogEvent.stopTask(
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 10),
+          source: ActivitySource.manualStop,
+        ),
+      );
+      await repository.append(
+        ActivityLogEvent.switchTask(
+          occurredAtUtc: DateTime.utc(2026, 1, 2, 9),
+          taskText: 'Recent task',
+        ),
+      );
+
+      expect((await repository.latestEvent())!.taskText, 'Recent task');
+      final taskEvents = await repository.taskEventsBetween(
+        fromUtc: DateTime.utc(2026, 1, 2),
+        throughUtc: DateTime.utc(2026, 1, 3),
+      );
+
+      expect(taskEvents.map((event) => event.taskText), ['Recent task']);
+    });
   });
 
   group('SqliteRuntimeStateRepository', () {

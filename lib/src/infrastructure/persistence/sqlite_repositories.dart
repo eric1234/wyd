@@ -6,17 +6,22 @@ import 'app_database.dart';
 import 'sqlite_mappers.dart';
 
 final class SqliteActivityLogRepository implements ActivityLogRepository {
-  const SqliteActivityLogRepository(this._executor);
+  const SqliteActivityLogRepository(
+    this._executor, {
+    DateTime Function()? nowUtc,
+  }) : _nowUtc = nowUtc;
 
   final DatabaseExecutor _executor;
+  final DateTime Function()? _nowUtc;
 
   @override
   Future<ActivityLogEvent> append(ActivityLogEvent event) async {
+    final eventToInsert = _withInsertTimestamp(event);
     final id = await _executor.insert(
       'activity_log',
-      activityEventToRow(event),
+      activityEventToRow(eventToInsert),
     );
-    return event.withId(id);
+    return eventToInsert.withId(id);
   }
 
   @override
@@ -27,6 +32,53 @@ final class SqliteActivityLogRepository implements ActivityLogRepository {
     );
 
     return rows.map(activityEventFromRow).toList();
+  }
+
+  @override
+  Future<ActivityLogEvent?> latestEvent() async {
+    final rows = await _executor.query(
+      'activity_log',
+      orderBy: 'occurred_at_utc DESC, id DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    return activityEventFromRow(rows.single);
+  }
+
+  @override
+  Future<List<ActivityLogEvent>> taskEventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  }) async {
+    final rows = await _executor.query(
+      'activity_log',
+      where:
+          'event_type IN (?, ?) AND occurred_at_utc >= ? AND occurred_at_utc <= ?',
+      whereArgs: [
+        ActivityEventType.startTask.storageName,
+        ActivityEventType.switchTask.storageName,
+        serializeUtc(fromUtc),
+        serializeUtc(throughUtc),
+      ],
+      orderBy: 'occurred_at_utc ASC, id ASC',
+    );
+
+    return rows.map(activityEventFromRow).toList();
+  }
+
+  ActivityLogEvent _withInsertTimestamp(ActivityLogEvent event) {
+    return ActivityLogEvent(
+      id: event.id,
+      occurredAtUtc: event.occurredAtUtc,
+      eventType: event.eventType,
+      taskText: event.taskText,
+      taskTextNormalized: event.taskTextNormalized,
+      source: event.source,
+      createdAtUtc: (_nowUtc?.call() ?? DateTime.now()).toUtc(),
+    );
   }
 }
 
@@ -48,7 +100,13 @@ final class SqliteRuntimeStateRepository implements RuntimeStateRepository {
       return RuntimeState();
     }
 
-    return runtimeStateFromRow(rows.single);
+    final row = rows.single;
+    if (row['pending_prompt_expired'] == 1 &&
+        row['pending_prompt_shown_at_utc'] == null) {
+      throw StateError('Persisted prompt state is invalid.');
+    }
+
+    return runtimeStateFromRow(row);
   }
 
   @override
@@ -79,7 +137,16 @@ final class SqliteSettingsRepository implements SettingsRepository {
       return AppSettings.defaults;
     }
 
-    return settingsFromRow(rows.single);
+    final settings = settingsFromRow(rows.single);
+    final issues = settings.validate();
+    if (issues.isNotEmpty) {
+      throw StateError(
+        'Persisted settings are invalid: '
+        '${issues.map((issue) => issue.message).join(', ')}',
+      );
+    }
+
+    return settings;
   }
 
   @override

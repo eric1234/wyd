@@ -33,10 +33,18 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  await _runTrayApp();
+  try {
+    await _runTrayApp();
+  } catch (error) {
+    await _runFatalStartupApp(error);
+  }
 }
 
 Future<void> _runTrayApp() async {
+  if (!Platform.isLinux) {
+    throw UnsupportedError('wyd v1 currently supports Linux desktop only.');
+  }
+
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
   final platformBindings = DesktopPlatformBindings.current();
@@ -60,6 +68,8 @@ Future<void> _runTrayApp() async {
     typingActivityDetector: platformBindings.typingActivityDetector,
     onShowPrompt: () => controller.showNagPrompt(),
     onPromptTimedOut: () => controller.nagPromptTimedOut(),
+    onError: (error, stackTrace) =>
+        unawaited(controller.handleRuntimeError(error, stackTrace)),
   );
   controller = WydAppController(
     trackerService: trackerService,
@@ -72,6 +82,7 @@ Future<void> _runTrayApp() async {
     nagScheduler: nagScheduler,
     singleInstanceAdapter: MethodChannelSingleInstanceAdapter(),
     powerEventAdapter: platformBindings.powerEventAdapter,
+    startupAtLoginReconciler: settingsService.reconcileStartAtLogin,
     reportController: ReportController(reportService),
     settingsController: SettingsController(
       client: settingsService,
@@ -92,6 +103,23 @@ Future<void> _runTrayApp() async {
   });
 
   runApp(WydApp(controller: controller));
+}
+
+Future<void> _runFatalStartupApp(Object error) async {
+  runApp(WydFatalStartupApp(message: error.toString(), onExit: () => exit(1)));
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(() async {
+      try {
+        await windowManager.ensureInitialized();
+        final configurator = DesktopWindowConfigurator();
+        await windowManager.waitUntilReadyToShow();
+        await configurator.apply(WindowRoleConfiguration.startupError());
+        await configurator.showAndFocus();
+      } catch (_) {
+        exit(1);
+      }
+    }());
+  });
 }
 
 Future<void> _runRoleWindow(
@@ -127,6 +155,11 @@ Future<void> _runRoleWindow(
           decodeRoleWindowConfiguration(call.arguments),
         );
       case RoleWindowProtocol.showAndFocusMethod:
+        _refreshRoleForShow(
+          role,
+          reportController: reportController,
+          settingsController: settingsController,
+        );
         await windowConfigurator.showAndFocus();
       case RoleWindowProtocol.pingMethod:
         return ready;
@@ -146,7 +179,6 @@ Future<void> _runRoleWindow(
         clock: clock,
       );
       reportController = ReportController(reportService);
-      await reportController.open();
     case WindowRole.settings:
       final settingsService = SettingsService(
         trackerService: trackerService,
@@ -156,7 +188,6 @@ Future<void> _runRoleWindow(
         client: settingsService,
         onSaved: (_) => _notifyMainWindowStateChanged(),
       );
-      await settingsController.open();
     case WindowRole.quickEntry:
       break;
   }
@@ -174,10 +205,30 @@ Future<void> _runRoleWindow(
       await windowConfigurator.apply(windowConfiguration);
       ready = true;
       if (showOnReady) {
+        _refreshRoleForShow(
+          role,
+          reportController: reportController,
+          settingsController: settingsController,
+        );
         await windowConfigurator.showAndFocus();
       }
     }());
   });
+}
+
+void _refreshRoleForShow(
+  WindowRole role, {
+  required ReportController? reportController,
+  required SettingsController? settingsController,
+}) {
+  switch (role) {
+    case WindowRole.report:
+      reportController?.refreshForShow();
+    case WindowRole.settings:
+      settingsController?.refreshForShow();
+    case WindowRole.quickEntry:
+      break;
+  }
 }
 
 TrackerService _trackerService(
@@ -196,8 +247,9 @@ TrackerService _trackerService(
 Future<void> _notifyMainWindowStateChanged() async {
   try {
     await _mainWindowEventsChannel.invokeMethod<void>('stateChanged');
-  } catch (_) {
-    // The settings write is already persisted; notification only refreshes the
-    // tray process' in-memory scheduler/menu snapshot.
+  } catch (error) {
+    throw StateError(
+      'Settings were saved, but the tray process did not refresh: $error',
+    );
   }
 }

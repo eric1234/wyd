@@ -12,7 +12,7 @@ final class XdgAutostartStartupAtLoginAdapter implements StartupAtLoginAdapter {
     String? executablePath,
     String? configHome,
     Map<String, String>? environment,
-  }) : _appId = appId,
+  }) : _appId = _validateAppId(appId),
        _appName = appName,
        _appComment = appComment ?? "What's ya doin? tray-based time tracker",
        _executablePath = executablePath ?? Platform.resolvedExecutable,
@@ -90,5 +90,13 @@ X-GNOME-Autostart-enabled=true
   static String _quoteExecPath(String path) {
     final escaped = path.replaceAll('\\', r'\\').replaceAll('"', r'\"');
     return '"$escaped"';
+  }
+
+  static String _validateAppId(String appId) {
+    final validDesktopId = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$');
+    if (!validDesktopId.hasMatch(appId) || appId.contains('..')) {
+      throw ArgumentError.value(appId, 'appId', 'Invalid XDG desktop id.');
+    }
+    return appId;
   }
 }

@@ -166,6 +166,35 @@ void main() {
       expect(controller.state.reminderIntervalMinutes, '45');
       expect(controller.state.saving, isFalse);
     });
+
+    test('refreshForShow reloads clean settings from client', () async {
+      final client = _FakeSettingsClient(snapshot: _snapshot());
+      final controller = _controller(client);
+      await controller.open();
+      client.snapshot = _snapshot(
+        settings: const AppSettings(reminderIntervalMinutes: 25),
+      );
+
+      controller.refreshForShow();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state.reminderIntervalMinutes, '25');
+    });
+
+    test('refreshForShow preserves dirty drafts', () async {
+      final client = _FakeSettingsClient(snapshot: _snapshot());
+      final controller = _controller(client);
+      await controller.open();
+      controller.updateReminderInterval('30');
+      client.snapshot = _snapshot(
+        settings: const AppSettings(reminderIntervalMinutes: 25),
+      );
+
+      controller.refreshForShow();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state.reminderIntervalMinutes, '30');
+    });
   });
 }
 

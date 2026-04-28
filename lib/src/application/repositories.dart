@@ -4,6 +4,13 @@ abstract interface class ActivityLogRepository {
   Future<ActivityLogEvent> append(ActivityLogEvent event);
 
   Future<List<ActivityLogEvent>> allEvents();
+
+  Future<ActivityLogEvent?> latestEvent();
+
+  Future<List<ActivityLogEvent>> taskEventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  });
 }
 
 abstract interface class RuntimeStateRepository {

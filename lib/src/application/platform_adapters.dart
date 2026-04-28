@@ -50,6 +50,28 @@ final class WindowRoleConfiguration {
     );
   }
 
+  factory WindowRoleConfiguration.startupError() {
+    return const WindowRoleConfiguration(
+      role: WindowRole.quickEntry,
+      title: 'wyd startup error',
+      width: 560,
+      height: 360,
+      resizable: false,
+      alwaysOnTop: true,
+    );
+  }
+
+  factory WindowRoleConfiguration.runtimeError() {
+    return const WindowRoleConfiguration(
+      role: WindowRole.quickEntry,
+      title: 'wyd error',
+      width: 560,
+      height: 320,
+      resizable: false,
+      alwaysOnTop: true,
+    );
+  }
+
   factory WindowRoleConfiguration.forRole(WindowRole role) {
     return switch (role) {
       WindowRole.quickEntry => WindowRoleConfiguration.quickEntry(),

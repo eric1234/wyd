@@ -148,8 +148,9 @@ final class TrackerService {
   Future<TrackingSession> _loadTrackingSession(
     AppTransaction transaction,
   ) async {
+    final latestEvent = await transaction.activityLog.latestEvent();
     return TrackingSession(
-      timeline: ActivityTimeline(await transaction.activityLog.allEvents()),
+      timeline: ActivityTimeline([?latestEvent]),
       runtimeState: await transaction.runtimeState.read(),
     );
   }

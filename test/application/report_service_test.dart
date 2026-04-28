@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:wyd/src/application/application.dart';
@@ -30,6 +32,32 @@ void main() {
       expect(report.rows.single.taskText, 'Write docs');
       expect(report.rows.single.duration, const Duration(minutes: 90));
     });
+
+    test(
+      'derives reports from bounded events around the selected day',
+      () async {
+        final harness = await _Harness.create();
+        addTearDown(harness.dispose);
+        final day = DateTime(2026, 1, 1);
+        await harness.activityLog.append(
+          ActivityLogEvent.startTask(
+            occurredAtUtc: DateTime(2025, 12, 31, 20).toUtc(),
+            taskText: 'Long task',
+          ),
+        );
+        await harness.activityLog.append(
+          ActivityLogEvent.stopTask(
+            occurredAtUtc: DateTime(2026, 1, 3).toUtc(),
+            source: ActivitySource.manualStop,
+          ),
+        );
+
+        final report = await harness.reportService.loadDailyReport(day);
+
+        expect(report.totalDuration, const Duration(hours: 24));
+        expect(report.rows.single.taskText, 'Long task');
+      },
+    );
   });
 
   group('ReportController', () {
@@ -90,6 +118,30 @@ void main() {
 
       expect(controller.state.report!.rows, isEmpty);
     });
+
+    test('ignores stale date load results', () async {
+      final loader = _DelayedDailyReportLoader(DateTime(2026, 1, 3));
+      final controller = ReportController(loader);
+      final firstDate = DateTime(2026, 1, 1);
+      final secondDate = DateTime(2026, 1, 2);
+
+      final firstLoad = controller.loadDate(firstDate);
+      final secondLoad = controller.loadDate(secondDate);
+
+      expect(loader.requests.map((request) => request.localDate), [
+        firstDate,
+        secondDate,
+      ]);
+      loader.complete(1, _report(secondDate, 'Second result'));
+      await secondLoad;
+      expect(controller.state.selectedDate, secondDate);
+      expect(controller.state.report!.rows.single.taskText, 'Second result');
+
+      loader.complete(0, _report(firstDate, 'Stale result'));
+      await firstLoad;
+      expect(controller.state.selectedDate, secondDate);
+      expect(controller.state.report!.rows.single.taskText, 'Second result');
+    });
   });
 }
 
@@ -129,4 +181,46 @@ final class _FakeClock implements Clock {
 
   @override
   DateTime nowUtc() => current;
+}
+
+final class _DelayedDailyReportLoader implements DailyReportLoader {
+  _DelayedDailyReportLoader(this.today);
+
+  final DateTime today;
+  final List<_ReportRequest> requests = [];
+
+  @override
+  DateTime todayLocalDate() => today;
+
+  @override
+  Future<DailyReport> loadDailyReport(DateTime localDate) {
+    final request = _ReportRequest(localDate);
+    requests.add(request);
+    return request.completer.future;
+  }
+
+  void complete(int index, DailyReport report) {
+    requests[index].completer.complete(report);
+  }
+}
+
+final class _ReportRequest {
+  _ReportRequest(this.localDate);
+
+  final DateTime localDate;
+  final Completer<DailyReport> completer = Completer<DailyReport>();
+}
+
+DailyReport _report(DateTime localDate, String taskText) {
+  return DailyReport(
+    localDate: localDate,
+    totalDuration: const Duration(minutes: 1),
+    rows: [
+      ReportRow(
+        taskText: taskText,
+        taskTextNormalized: taskText.toLowerCase(),
+        duration: const Duration(minutes: 1),
+      ),
+    ],
+  );
 }

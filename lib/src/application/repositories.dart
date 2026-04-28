@@ -7,6 +7,13 @@ abstract interface class ActivityLogRepository {
 
   Future<ActivityLogEvent?> latestEvent();
 
+  Future<ActivityLogEvent?> latestEventBefore(DateTime beforeUtc);
+
+  Future<List<ActivityLogEvent>> eventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  });
+
   Future<List<ActivityLogEvent>> taskEventsBetween({
     required DateTime fromUtc,
     required DateTime throughUtc,

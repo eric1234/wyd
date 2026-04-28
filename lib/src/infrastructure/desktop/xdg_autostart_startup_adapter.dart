@@ -13,10 +13,18 @@ final class XdgAutostartStartupAtLoginAdapter implements StartupAtLoginAdapter {
     String? configHome,
     Map<String, String>? environment,
   }) : _appId = _validateAppId(appId),
-       _appName = appName,
-       _appComment = appComment ?? "What's ya doin? tray-based time tracker",
-       _executablePath = executablePath ?? Platform.resolvedExecutable,
-       _configHome = configHome ?? _defaultConfigHome(environment);
+       _appName = _validateDesktopValue(appName, 'appName'),
+       _appComment = _validateDesktopValue(
+         appComment ?? "What's ya doin? tray-based time tracker",
+         'appComment',
+       ),
+       _executablePath = _validateExecutablePath(
+         executablePath ?? Platform.resolvedExecutable,
+       ),
+       _configHome = _validatePath(
+         configHome ?? _defaultConfigHome(environment),
+         'configHome',
+       );
 
   final String _appId;
   final String _appName;
@@ -84,7 +92,7 @@ X-GNOME-Autostart-enabled=true
   }
 
   static String _escapeValue(String value) {
-    return value.replaceAll('\\', r'\\').replaceAll('\n', r'\n');
+    return value.replaceAll('\\', r'\\');
   }
 
   static String _quoteExecPath(String path) {
@@ -98,5 +106,48 @@ X-GNOME-Autostart-enabled=true
       throw ArgumentError.value(appId, 'appId', 'Invalid XDG desktop id.');
     }
     return appId;
+  }
+
+  static String _validateDesktopValue(String value, String fieldName) {
+    if (_containsControlCharacter(value)) {
+      throw ArgumentError.value(
+        value,
+        fieldName,
+        'Desktop entry values must not contain control characters.',
+      );
+    }
+    return value;
+  }
+
+  static String _validateExecutablePath(String path) {
+    final validated = _validatePath(path, 'executablePath');
+    if (!p.isAbsolute(validated)) {
+      throw ArgumentError.value(
+        path,
+        'executablePath',
+        'XDG autostart executable path must be absolute.',
+      );
+    }
+    return validated;
+  }
+
+  static String _validatePath(String path, String fieldName) {
+    if (path.isEmpty || _containsControlCharacter(path)) {
+      throw ArgumentError.value(
+        path,
+        fieldName,
+        'Path must not be empty or contain control characters.',
+      );
+    }
+    return path;
+  }
+
+  static bool _containsControlCharacter(String value) {
+    for (final codeUnit in value.codeUnits) {
+      if (codeUnit < 0x20 || codeUnit == 0x7f) {
+        return true;
+      }
+    }
+    return false;
   }
 }

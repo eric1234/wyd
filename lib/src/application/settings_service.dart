@@ -39,21 +39,20 @@ final class SettingsService implements SettingsClient {
     final shouldUpdateStartup =
         capabilities.supportsStartAtLogin &&
         current.settings.startAtLogin != normalizedSettings.startAtLogin;
-    final savedSnapshot = await _trackerService.updateSettings(
-      normalizedSettings,
-    );
+    var startupUpdated = false;
     try {
       if (shouldUpdateStartup) {
         await _startupAtLoginAdapter.setEnabled(
           normalizedSettings.startAtLogin,
         );
+        startupUpdated = true;
       }
-      return savedSnapshot;
+      return await _trackerService.updateSettings(normalizedSettings);
     } catch (error) {
-      await _rollbackPersistedSettings(current.settings);
-      throw StateError(
-        'Settings were saved, but start-at-login could not be updated: $error',
-      );
+      if (startupUpdated) {
+        await _rollbackStartAtLogin(current.settings.startAtLogin);
+      }
+      throw StateError('Settings were not saved or applied: $error');
     }
   }
 
@@ -69,12 +68,12 @@ final class SettingsService implements SettingsClient {
     }
   }
 
-  Future<void> _rollbackPersistedSettings(AppSettings previousSettings) async {
+  Future<void> _rollbackStartAtLogin(bool previousValue) async {
     try {
-      await _trackerService.updateSettings(previousSettings);
+      await _startupAtLoginAdapter.setEnabled(previousValue);
     } catch (_) {
-      // Preserve the platform-side failure; the next startup reconciliation will
-      // attempt to make the platform match persisted settings again.
+      // Preserve the original failure. Startup reconciliation will make the
+      // platform match the still-authoritative persisted setting later.
     }
   }
 }

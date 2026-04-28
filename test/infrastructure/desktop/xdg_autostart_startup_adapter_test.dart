@@ -188,8 +188,8 @@ X-GNOME-Autostart-enabled=false
       addTearDown(() => tempDirectory.delete(recursive: true));
       final adapter = XdgAutostartStartupAtLoginAdapter(
         appId: 'dev.wyd.test',
-        appName: 'wyd\\name\nnext',
-        appComment: 'comment\\line\nnext',
+        appName: 'wyd\\name',
+        appComment: 'comment\\line',
         executablePath: '/opt/"wyd"\\app',
         configHome: tempDirectory.path,
       );
@@ -199,9 +199,29 @@ X-GNOME-Autostart-enabled=false
       final content = await File(
         p.join(tempDirectory.path, 'autostart', 'dev.wyd.test.desktop'),
       ).readAsString();
-      expect(content, contains('Name=wyd\\\\name\\nnext'));
-      expect(content, contains('Comment=comment\\\\line\\nnext'));
+      expect(content, contains('Name=wyd\\\\name'));
+      expect(content, contains('Comment=comment\\\\line'));
       expect(content, contains('Exec="/opt/\\"wyd\\"\\\\app"'));
+    });
+
+    test('rejects unsafe desktop entry values and exec paths', () {
+      expect(
+        () => XdgAutostartStartupAtLoginAdapter(appName: 'bad\nname'),
+        throwsArgumentError,
+      );
+      expect(
+        () => XdgAutostartStartupAtLoginAdapter(appComment: 'bad\rcomment'),
+        throwsArgumentError,
+      );
+      expect(
+        () => XdgAutostartStartupAtLoginAdapter(executablePath: 'relative/wyd'),
+        throwsArgumentError,
+      );
+      expect(
+        () =>
+            XdgAutostartStartupAtLoginAdapter(executablePath: '/opt/wyd\nnext'),
+        throwsArgumentError,
+      );
     });
   });
 }

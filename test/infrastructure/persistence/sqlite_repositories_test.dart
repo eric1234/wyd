@@ -357,6 +357,21 @@ void main() {
       );
 
       expect((await repository.latestEvent())!.taskText, 'Recent task');
+      expect(
+        (await repository.latestEventBefore(
+          DateTime.utc(2026, 1, 2),
+        ))!.eventType,
+        ActivityEventType.stopTask,
+      );
+      final boundedEvents = await repository.eventsBetween(
+        fromUtc: DateTime.utc(2026, 1, 1, 10),
+        throughUtc: DateTime.utc(2026, 1, 2, 9),
+      );
+      expect(boundedEvents.map((event) => event.eventType), [
+        ActivityEventType.stopTask,
+        ActivityEventType.switchTask,
+      ]);
+
       final taskEvents = await repository.taskEventsBetween(
         fromUtc: DateTime.utc(2026, 1, 2),
         throughUtc: DateTime.utc(2026, 1, 3),

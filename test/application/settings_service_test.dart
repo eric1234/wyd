@@ -115,33 +115,31 @@ void main() {
       },
     );
 
-    test(
-      'does not change start-at-login when settings persistence fails',
-      () async {
-        final runner = _FailingSettingsSaveRunner();
-        final trackerService = TrackerService(
-          transactions: runner,
-          clock: _FakeClock(DateTime.utc(2026, 1, 1, 9)),
-          capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
-        );
-        final startupAtLogin = _FakeStartupAtLoginAdapter();
-        final service = SettingsService(
-          trackerService: trackerService,
-          startupAtLoginAdapter: startupAtLogin,
-        );
+    test('rolls back start-at-login when settings persistence fails', () async {
+      final runner = _FailingSettingsSaveRunner();
+      final trackerService = TrackerService(
+        transactions: runner,
+        clock: _FakeClock(DateTime.utc(2026, 1, 1, 9)),
+        capabilities: const PlatformCapabilities(supportsStartAtLogin: true),
+      );
+      final startupAtLogin = _FakeStartupAtLoginAdapter();
+      final service = SettingsService(
+        trackerService: trackerService,
+        startupAtLoginAdapter: startupAtLogin,
+      );
 
-        await expectLater(
-          () => service.saveSettings(const AppSettings(startAtLogin: true)),
-          throwsStateError,
-        );
+      await expectLater(
+        () => service.saveSettings(const AppSettings(startAtLogin: true)),
+        throwsStateError,
+      );
 
-        expect(startupAtLogin.enabledValues, isEmpty);
-        expect(
-          (await trackerService.loadSnapshot()).settings.startAtLogin,
-          isFalse,
-        );
-      },
-    );
+      expect(startupAtLogin.enabledValues, [true, false]);
+      expect(await startupAtLogin.isEnabled(), isFalse);
+      expect(
+        (await trackerService.loadSnapshot()).settings.startAtLogin,
+        isFalse,
+      );
+    });
 
     test('reconciles start-at-login from persisted settings', () async {
       final harness = await _Harness.create(
@@ -258,6 +256,15 @@ final class _EmptyActivityLogRepository implements ActivityLogRepository {
 
   @override
   Future<ActivityLogEvent?> latestEvent() async => null;
+
+  @override
+  Future<ActivityLogEvent?> latestEventBefore(DateTime beforeUtc) async => null;
+
+  @override
+  Future<List<ActivityLogEvent>> eventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  }) async => const [];
 
   @override
   Future<List<ActivityLogEvent>> taskEventsBetween({

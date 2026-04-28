@@ -49,6 +49,37 @@ final class SqliteActivityLogRepository implements ActivityLogRepository {
   }
 
   @override
+  Future<ActivityLogEvent?> latestEventBefore(DateTime beforeUtc) async {
+    final rows = await _executor.query(
+      'activity_log',
+      where: 'occurred_at_utc < ?',
+      whereArgs: [serializeUtc(beforeUtc)],
+      orderBy: 'occurred_at_utc DESC, id DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    return activityEventFromRow(rows.single);
+  }
+
+  @override
+  Future<List<ActivityLogEvent>> eventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  }) async {
+    final rows = await _executor.query(
+      'activity_log',
+      where: 'occurred_at_utc >= ? AND occurred_at_utc <= ?',
+      whereArgs: [serializeUtc(fromUtc), serializeUtc(throughUtc)],
+      orderBy: 'occurred_at_utc ASC, id ASC',
+    );
+
+    return rows.map(activityEventFromRow).toList();
+  }
+
+  @override
   Future<List<ActivityLogEvent>> taskEventsBetween({
     required DateTime fromUtc,
     required DateTime throughUtc,

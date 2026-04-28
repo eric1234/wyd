@@ -572,6 +572,28 @@ final class _MemoryActivityLogRepository implements ActivityLogRepository {
   }
 
   @override
+  Future<ActivityLogEvent?> latestEventBefore(DateTime beforeUtc) async {
+    final events = orderActivityEvents(_store.events)
+        .where((event) => event.occurredAtUtc.isBefore(beforeUtc.toUtc()))
+        .toList();
+    return events.isEmpty ? null : events.last;
+  }
+
+  @override
+  Future<List<ActivityLogEvent>> eventsBetween({
+    required DateTime fromUtc,
+    required DateTime throughUtc,
+  }) async {
+    return orderActivityEvents(_store.events)
+        .where(
+          (event) =>
+              !event.occurredAtUtc.isBefore(fromUtc.toUtc()) &&
+              !event.occurredAtUtc.isAfter(throughUtc.toUtc()),
+        )
+        .toList();
+  }
+
+  @override
   Future<List<ActivityLogEvent>> taskEventsBetween({
     required DateTime fromUtc,
     required DateTime throughUtc,

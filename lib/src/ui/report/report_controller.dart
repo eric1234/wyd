@@ -60,6 +60,7 @@ final class ReportController extends ChangeNotifier {
 
   final DailyReportLoader _service;
   ReportState _state = const ReportState();
+  int _loadRequest = 0;
 
   ReportState get state => _state;
 
@@ -77,7 +78,8 @@ final class ReportController extends ChangeNotifier {
   }
 
   void close() {
-    _setState(_state.copyWith(isOpen: false));
+    _loadRequest += 1;
+    _setState(_state.copyWith(isOpen: false, loading: false));
   }
 
   Future<void> previousDay() async {
@@ -108,6 +110,7 @@ final class ReportController extends ChangeNotifier {
     if (normalizedDate.isAfter(today)) {
       return;
     }
+    final request = ++_loadRequest;
 
     _setState(
       _state.copyWith(
@@ -122,6 +125,9 @@ final class ReportController extends ChangeNotifier {
 
     try {
       final report = await _service.loadDailyReport(normalizedDate);
+      if (request != _loadRequest) {
+        return;
+      }
       _setState(
         _state.copyWith(
           selectedDate: normalizedDate,
@@ -133,6 +139,9 @@ final class ReportController extends ChangeNotifier {
         ),
       );
     } catch (error) {
+      if (request != _loadRequest) {
+        return;
+      }
       _setState(
         _state.copyWith(
           selectedDate: normalizedDate,

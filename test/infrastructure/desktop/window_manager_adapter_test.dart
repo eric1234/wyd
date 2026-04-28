@@ -142,6 +142,24 @@ void main() {
       );
     });
 
+    test('hides resident startup window when no role is open', () async {
+      final adapter = SingleFlutterWindowAdapter();
+
+      await adapter.hideResidentWindow();
+
+      expect(windowCalls.any((call) => call.method == 'hide'), isTrue);
+    });
+
+    test('does not hide an open role window as resident startup', () async {
+      final adapter = SingleFlutterWindowAdapter();
+      await adapter.open(WindowRoleConfiguration.quickEntry());
+      windowCalls.clear();
+
+      await adapter.hideResidentWindow();
+
+      expect(windowCalls.any((call) => call.method == 'hide'), isFalse);
+    });
+
     test(
       'normalizes fullscreen maximized and minimized states before sizing',
       () async {

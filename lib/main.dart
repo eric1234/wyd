@@ -41,8 +41,10 @@ Future<void> main(List<String> args) async {
 }
 
 Future<void> _runTrayApp() async {
-  if (!Platform.isLinux) {
-    throw UnsupportedError('wyd v1 currently supports Linux desktop only.');
+  if (!Platform.isLinux && !Platform.isMacOS) {
+    throw UnsupportedError(
+      'wyd currently supports Linux and macOS desktop only.',
+    );
   }
 
   final database = await AppDatabase.openDefault();
@@ -61,6 +63,7 @@ Future<void> _runTrayApp() async {
     trackerService: trackerService,
     startupAtLoginAdapter: platformBindings.startupAtLoginAdapter,
   );
+  final primaryWindowAdapter = SingleFlutterWindowAdapter();
   late final WydAppController controller;
   final nagScheduler = NagScheduler(
     clock: clock,
@@ -75,14 +78,16 @@ Future<void> _runTrayApp() async {
     trackerService: trackerService,
     trayAdapter: TrayManagerAdapter(),
     windowCoordinator: WindowCoordinator(
-      DesktopMultiWindowAdapter(
-        primaryWindowAdapter: SingleFlutterWindowAdapter(),
-      ),
+      DesktopMultiWindowAdapter(primaryWindowAdapter: primaryWindowAdapter),
     ),
     nagScheduler: nagScheduler,
     singleInstanceAdapter: MethodChannelSingleInstanceAdapter(),
     powerEventAdapter: platformBindings.powerEventAdapter,
+    nativeLifecycleAdapter: platformBindings.nativeLifecycleAdapter,
     startupAtLoginReconciler: settingsService.reconcileStartAtLogin,
+    hideResidentWindow: Platform.isMacOS
+        ? primaryWindowAdapter.hideResidentWindow
+        : null,
     reportController: ReportController(reportService),
     settingsController: SettingsController(
       client: settingsService,

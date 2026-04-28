@@ -1,4 +1,6 @@
 export 'desktop_platform_bindings.dart';
+export 'event_channel_power_event_adapter.dart';
+export 'method_channel_native_lifecycle_adapter.dart';
 export 'method_channel_single_instance_adapter.dart';
 export 'multi_window_adapter.dart';
 export 'tray_manager_adapter.dart';

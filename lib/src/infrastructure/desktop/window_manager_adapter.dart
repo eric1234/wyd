@@ -76,6 +76,15 @@ final class SingleFlutterWindowAdapter
     await _windowManager.hide();
   }
 
+  Future<void> hideResidentWindow() async {
+    if (_currentHandle != null) {
+      return;
+    }
+
+    await _windowManager.ensureInitialized();
+    await _windowManager.hide();
+  }
+
   @override
   void onWindowClose() {
     unawaited(_handleNativeClose());

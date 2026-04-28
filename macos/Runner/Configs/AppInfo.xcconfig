@@ -8,7 +8,7 @@
 PRODUCT_NAME = wyd
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.wyd
+PRODUCT_BUNDLE_IDENTIFIER = invalid.wyd
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Public domain under the Unlicense.

@@ -127,6 +127,20 @@ abstract interface class SingleInstanceAdapter {
   Future<void> initialize(Future<void> Function() onSecondInstanceActivated);
 }
 
+abstract interface class NativeLifecycleAdapter {
+  Future<void> initialize(Future<void> Function() onTerminationRequested);
+}
+
+final class UnsupportedNativeLifecycleAdapter
+    implements NativeLifecycleAdapter {
+  const UnsupportedNativeLifecycleAdapter();
+
+  @override
+  Future<void> initialize(
+    Future<void> Function() onTerminationRequested,
+  ) async {}
+}
+
 abstract interface class StartupAtLoginAdapter {
   Future<bool> isEnabled();
 

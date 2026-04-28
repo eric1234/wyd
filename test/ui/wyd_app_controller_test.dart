@@ -25,6 +25,15 @@ void main() {
       );
     });
 
+    test('hides the resident primary window after startup', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+
+      await harness.controller.initialize();
+
+      expect(harness.hideResidentWindowRequests(), 1);
+    });
+
     test('surfaces startup error when tray initialization fails', () async {
       final harness = await _Harness.create(trayFailsOnInitialize: true);
       addTearDown(harness.dispose);
@@ -38,6 +47,7 @@ void main() {
         harness.window.openedConfigurations.last.title,
         'wyd startup error',
       );
+      expect(harness.hideResidentWindowRequests(), 1);
     });
 
     test('opens quick entry through controller and submits a task', () async {
@@ -313,6 +323,21 @@ void main() {
       },
     );
 
+    test('native termination request follows graceful exit path', () async {
+      final harness = await _Harness.create(withNativeLifecycle: true);
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+      await harness.controller.openQuickEntry();
+      await harness.controller.quickEntry.updateText('Write docs');
+      await harness.controller.quickEntry.submit();
+
+      await harness.nativeLifecycle.requestTermination();
+
+      expect(harness.exitRequests(), 1);
+      final events = await harness.activityLog.allEvents();
+      expect(events.last.source, ActivitySource.exit);
+    });
+
     test(
       'submitting nag closes quick entry without altering report window',
       () async {
@@ -392,6 +417,24 @@ void main() {
         isFalse,
       );
     });
+
+    test('power event stream errors surface as runtime errors', () async {
+      final powerEvents = _FakePowerEventAdapter();
+      addTearDown(powerEvents.dispose);
+      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+
+      powerEvents.emitError(StateError('power stream failed'));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        harness.controller.runtimeErrorMessage,
+        contains('power stream failed'),
+      );
+      expect(harness.window.openedConfigurations.last.title, 'wyd error');
+    });
   });
 }
 
@@ -404,8 +447,10 @@ final class _Harness {
     required this.clock,
     required this.timers,
     required this.singleInstance,
+    required this.nativeLifecycle,
     required this.controller,
     required this.exitRequests,
+    required this.hideResidentWindowRequests,
   });
 
   final AppDatabase database;
@@ -415,14 +460,18 @@ final class _Harness {
   final _FakeClock clock;
   final _FakeSchedulerTimerFactory timers;
   final _FakeSingleInstanceAdapter singleInstance;
+  final _FakeNativeLifecycleAdapter nativeLifecycle;
   final WydAppController controller;
   final int Function() exitRequests;
+  final int Function() hideResidentWindowRequests;
 
   static Future<_Harness> create({
     bool withScheduler = false,
     bool withSingleInstance = false,
+    bool withNativeLifecycle = false,
     bool trayFailsOnInitialize = false,
     Duration? secondaryWindowWarmUpDelay,
+    PowerEventAdapter powerEventAdapter = const UnsupportedPowerEventAdapter(),
   }) async {
     final database = await AppDatabase.openInMemory(
       databaseFactory: databaseFactoryFfi,
@@ -436,7 +485,9 @@ final class _Harness {
     final window = _FakeWindowAdapter();
     final timers = _FakeSchedulerTimerFactory();
     final singleInstance = _FakeSingleInstanceAdapter();
+    final nativeLifecycle = _FakeNativeLifecycleAdapter();
     var exitRequests = 0;
+    var hideResidentWindowRequests = 0;
     late final WydAppController controller;
     final scheduler = withScheduler
         ? NagScheduler(
@@ -455,7 +506,12 @@ final class _Harness {
       windowCoordinator: WindowCoordinator(window),
       nagScheduler: scheduler,
       singleInstanceAdapter: withSingleInstance ? singleInstance : null,
+      nativeLifecycleAdapter: withNativeLifecycle ? nativeLifecycle : null,
+      powerEventAdapter: powerEventAdapter,
       secondaryWindowWarmUpDelay: secondaryWindowWarmUpDelay,
+      hideResidentWindow: () async {
+        hideResidentWindowRequests += 1;
+      },
       onExit: () async {
         exitRequests += 1;
       },
@@ -469,8 +525,10 @@ final class _Harness {
       clock: clock,
       timers: timers,
       singleInstance: singleInstance,
+      nativeLifecycle: nativeLifecycle,
       controller: controller,
       exitRequests: () => exitRequests,
+      hideResidentWindowRequests: () => hideResidentWindowRequests,
     );
   }
 
@@ -479,6 +537,22 @@ final class _Harness {
     await tray.dispose();
     await window.dispose();
     await database.close();
+  }
+}
+
+final class _FakePowerEventAdapter implements PowerEventAdapter {
+  final StreamController<PowerEvent> _events =
+      StreamController<PowerEvent>.broadcast();
+
+  @override
+  Stream<PowerEvent> get events => _events.stream;
+
+  void emitError(Object error) {
+    _events.addError(error, StackTrace.current);
+  }
+
+  Future<void> dispose() async {
+    await _events.close();
   }
 }
 
@@ -494,6 +568,21 @@ final class _FakeSingleInstanceAdapter implements SingleInstanceAdapter {
 
   Future<void> activateSecondInstance() async {
     await _onSecondInstanceActivated?.call();
+  }
+}
+
+final class _FakeNativeLifecycleAdapter implements NativeLifecycleAdapter {
+  Future<void> Function()? _onTerminationRequested;
+
+  @override
+  Future<void> initialize(
+    Future<void> Function() onTerminationRequested,
+  ) async {
+    _onTerminationRequested = onTerminationRequested;
+  }
+
+  Future<void> requestTermination() async {
+    await _onTerminationRequested?.call();
   }
 }
 

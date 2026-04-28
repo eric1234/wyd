@@ -6,9 +6,14 @@ import 'package:tray_manager/tray_manager.dart' as tray;
 import '../../application/application.dart';
 
 final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
-  TrayManagerAdapter({String? iconPath, tray.TrayManager? trayManager})
-    : iconPath = iconPath ?? _defaultIconPath,
-      _trayManager = trayManager ?? tray.trayManager;
+  TrayManagerAdapter({
+    String? iconPath,
+    tray.TrayManager? trayManager,
+    bool? supportsSecondaryClickMenu,
+  }) : iconPath = iconPath ?? _defaultIconPath,
+       supportsSecondaryClickMenu =
+           supportsSecondaryClickMenu ?? Platform.isMacOS,
+       _trayManager = trayManager ?? tray.trayManager;
 
   static String get _defaultIconPath {
     if (Platform.isMacOS) {
@@ -21,6 +26,7 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
   }
 
   final String iconPath;
+  final bool supportsSecondaryClickMenu;
   final tray.TrayManager _trayManager;
   final StreamController<TrayMenuAction> _menuActions =
       StreamController<TrayMenuAction>.broadcast();
@@ -57,7 +63,20 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
 
   @override
   void onTrayIconMouseDown() {
+    if (!supportsSecondaryClickMenu) {
+      return;
+    }
+
     _primaryClicks.add(null);
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    if (!supportsSecondaryClickMenu) {
+      return;
+    }
+
+    unawaited(_trayManager.popUpContextMenu());
   }
 
   @override

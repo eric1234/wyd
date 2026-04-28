@@ -11,9 +11,10 @@
 ```bash
 flutter doctor
 flutter config --enable-linux-desktop
+flutter config --enable-macos-desktop
 ```
 
-macOS and Windows runners are present from Flutter's project template, but the product currently gates the tray app to Linux while those platforms wait for later tray-first lifecycle work.
+Windows runners are present from Flutter's project template, but the product currently gates the tray app to Linux and macOS while Windows waits for later tray-first lifecycle work.
 
 3. On Debian/Ubuntu Linux development machines, install the desktop build dependencies used by Flutter, the tray plugin, and SQLite native assets:
 
@@ -31,15 +32,17 @@ flutter pub get
 
 ```bash
 flutter run -d linux
+flutter run -d macos
 ```
 
 6. Build a release binary:
 
 ```bash
 flutter build linux --release
+flutter build macos --release
 ```
 
-The built Linux app will be placed under `build/linux/`.
+The built apps will be placed under `build/linux/` and `build/macos/`.
 
 ## Useful Commands
 
@@ -55,12 +58,14 @@ Run integration tests through the project script instead of invoking the `integr
 
 ```bash
 ./tool/run_integration_tests.sh linux
+./tool/run_integration_tests.sh macos
 ```
 
-The script accepts a Flutter device ID and runs each `integration_test/*_test.dart` file in a separate Flutter process. Linux is the supported v1 target:
+The script accepts a Flutter device ID and runs each `integration_test/*_test.dart` file in a separate Flutter process. Linux is the default target:
 
 ```bash
 WYD_INTEGRATION_DEVICE=linux ./tool/run_integration_tests.sh
+WYD_INTEGRATION_DEVICE=macos ./tool/run_integration_tests.sh
 ```
 
 This per-file runner is the standard project workflow for all platforms. It avoids a Flutter desktop integration-test harness issue where `flutter test integration_test -d linux` can pass the first file and then fail a later app launch with `Error waiting for a debug connection`.
@@ -69,15 +74,18 @@ This per-file runner is the standard project workflow for all platforms. It avoi
 
 Linux currently supports the required tray workflow, local SQLite persistence, hidden startup, single-instance activation routing, quick entry, nag timeout, reports, settings, recovery, and XDG autostart-based start-at-login.
 
+macOS currently supports the tray/menu-bar workflow, local SQLite persistence, hidden startup, LaunchServices reopen routing through the single-instance activation path, quick entry, nag timeout, reports, settings, recovery, Cmd+Q/App menu quit routing through graceful exit, and native sleep/lock event routing.
+
 The current Linux implementation uses the primary Flutter window for quick entry and separate warmed child windows for report/settings. The child windows are preloaded hidden so first visible use is responsive, then report/settings data is refreshed when the warmed window is actually shown.
 
 The following optional capabilities are intentionally disabled unless a reliable platform adapter is added for the target session:
 
-- Lock/sleep detection: unsupported by default; the app exposes the adapter seam and tests simulated events.
+- Lock/sleep detection: supported on macOS through native workspace/session notifications; unsupported by default on other platforms.
+- Start at login: supported on Linux through XDG autostart; unsupported on macOS until a packaging-safe login item implementation is added.
 - Recent typing detection: unsupported by default, so typing deferral is disabled in settings and nags show normally.
 - Tray-relative popup positioning: unsupported by default; popup windows are centered through `window_manager`.
 
-Linux integration tests use fake platform adapters for workflows that are unreliable in headless or sessionless CI. Real tray behavior still requires a manual smoke pass on the target desktop session.
+Integration tests use fake platform adapters for workflows that are unreliable in headless or sessionless CI. Real tray behavior still requires a manual smoke pass on the target desktop session.
 
 See `PROJECT_SPEC.md` for the product and implementation spec.
 

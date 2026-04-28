@@ -16,9 +16,11 @@ final class WydAppController extends ChangeNotifier {
     required Future<void> Function() onExit,
     NagScheduler? nagScheduler,
     SingleInstanceAdapter? singleInstanceAdapter,
+    NativeLifecycleAdapter? nativeLifecycleAdapter,
     PowerEventAdapter powerEventAdapter = const UnsupportedPowerEventAdapter(),
     Duration? secondaryWindowWarmUpDelay = const Duration(seconds: 1),
     Future<void> Function(AppStateSnapshot snapshot)? startupAtLoginReconciler,
+    Future<void> Function()? hideResidentWindow,
     this.reportController,
     this.settingsController,
   }) : _trackerService = trackerService,
@@ -27,9 +29,11 @@ final class WydAppController extends ChangeNotifier {
        _onExit = onExit,
        _nagScheduler = nagScheduler,
        _singleInstanceAdapter = singleInstanceAdapter,
+       _nativeLifecycleAdapter = nativeLifecycleAdapter,
        _powerEventAdapter = powerEventAdapter,
        _secondaryWindowWarmUpDelay = secondaryWindowWarmUpDelay,
-       _startupAtLoginReconciler = startupAtLoginReconciler {
+       _startupAtLoginReconciler = startupAtLoginReconciler,
+       _hideResidentWindow = hideResidentWindow {
     quickEntry = QuickEntryController(
       client: TrackerQuickEntryClient(_trackerService),
       onSubmitted: _quickEntrySubmitted,
@@ -45,10 +49,12 @@ final class WydAppController extends ChangeNotifier {
   final Future<void> Function() _onExit;
   final NagScheduler? _nagScheduler;
   final SingleInstanceAdapter? _singleInstanceAdapter;
+  final NativeLifecycleAdapter? _nativeLifecycleAdapter;
   final PowerEventAdapter _powerEventAdapter;
   final Duration? _secondaryWindowWarmUpDelay;
   final Future<void> Function(AppStateSnapshot snapshot)?
   _startupAtLoginReconciler;
+  final Future<void> Function()? _hideResidentWindow;
 
   final ReportController? reportController;
   final SettingsController? settingsController;
@@ -79,15 +85,20 @@ final class WydAppController extends ChangeNotifier {
     _initialized = true;
 
     try {
+      await _hideResidentWindow?.call();
       _snapshot = await _trackerService.recoverOnStartup();
       await _trayAdapter.initialize(TrayMenuPresenter.build(_snapshot!));
       await _singleInstanceAdapter?.initialize(openQuickEntry);
+      await _nativeLifecycleAdapter?.initialize(exitRequested);
       _menuSubscription = _trayAdapter.menuActions.listen(_handleTrayAction);
       _primaryClickSubscription = _trayAdapter.primaryClicks.listen(
         (_) => unawaited(_runUserAction(openQuickEntry)),
       );
       _powerEventSubscription = _powerEventAdapter.events.listen(
         (event) => unawaited(_runUserAction(() => handlePowerEvent(event))),
+        onError: (Object error, StackTrace stackTrace) {
+          unawaited(handleRuntimeError(error, stackTrace));
+        },
       );
       _nagScheduler?.update(_snapshot!);
       notifyListeners();

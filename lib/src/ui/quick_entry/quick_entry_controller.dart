@@ -103,15 +103,17 @@ final class QuickEntryController extends ChangeNotifier {
 
     final activeTask = snapshot.activeTask;
     final initialText = activeTask?.taskText ?? '';
-    final initialSuggestions = activeTask == null
-        ? snapshot.recentSuggestions
-        : const <AutocompleteSuggestion>[];
+    final initialSuggestions = snapshot.recentSuggestions;
+    final shouldHighlightFirstSuggestion = initialText.isEmpty;
     _setState(
       QuickEntryState(
         isOpen: true,
         text: initialText,
         suggestions: initialSuggestions,
-        highlightedIndex: initialSuggestions.isEmpty ? null : 0,
+        highlightedIndex:
+            shouldHighlightFirstSuggestion && initialSuggestions.isNotEmpty
+            ? 0
+            : null,
         selectAllOnOpen: initialText.isNotEmpty,
       ),
     );
@@ -148,16 +150,33 @@ final class QuickEntryController extends ChangeNotifier {
   Future<void> refreshSuggestions() async {
     final request = ++_suggestionRequest;
     final query = _state.text;
-    final suggestions = await _client.autocompleteSuggestions(query);
+    final filteredSuggestions = await _client.autocompleteSuggestions(query);
     if (request != _suggestionRequest || !_state.isOpen) {
       return;
     }
 
+    final showRecentTasks = _shouldShowRecentTasksForExactInput(
+      query,
+      filteredSuggestions,
+    );
+    final suggestions = showRecentTasks
+        ? await _recentSuggestionsOrFallback(
+            request: request,
+            fallback: filteredSuggestions,
+          )
+        : filteredSuggestions;
+    if (suggestions == null) {
+      return;
+    }
+
+    final shouldHighlightFirstSuggestion =
+        suggestions.isNotEmpty && !showRecentTasks;
+
     _setState(
       _state.copyWith(
         suggestions: suggestions,
-        highlightedIndex: suggestions.isEmpty ? null : 0,
-        clearHighlightedIndex: suggestions.isEmpty,
+        highlightedIndex: shouldHighlightFirstSuggestion ? 0 : null,
+        clearHighlightedIndex: !shouldHighlightFirstSuggestion,
       ),
     );
   }
@@ -169,7 +188,16 @@ final class QuickEntryController extends ChangeNotifier {
       return;
     }
 
-    final current = _state.highlightedIndex ?? 0;
+    final current = _state.highlightedIndex;
+    if (current == null) {
+      _setState(
+        _state.copyWith(
+          highlightedIndex: delta < 0 ? suggestions.length - 1 : 0,
+        ),
+      );
+      return;
+    }
+
     final next = (current + delta) % suggestions.length;
     _setState(
       _state.copyWith(
@@ -235,5 +263,27 @@ final class QuickEntryController extends ChangeNotifier {
   void _setState(QuickEntryState state) {
     _state = state;
     notifyListeners();
+  }
+
+  bool _shouldShowRecentTasksForExactInput(
+    String query,
+    List<AutocompleteSuggestion> filteredSuggestions,
+  ) {
+    final queryNormalized = TaskText.normalizeForEquality(query);
+    return queryNormalized.isNotEmpty &&
+        filteredSuggestions.length == 1 &&
+        filteredSuggestions.single.taskTextNormalized == queryNormalized;
+  }
+
+  Future<List<AutocompleteSuggestion>?> _recentSuggestionsOrFallback({
+    required int request,
+    required List<AutocompleteSuggestion> fallback,
+  }) async {
+    final recentSuggestions = await _client.autocompleteSuggestions('');
+    if (request != _suggestionRequest || !_state.isOpen) {
+      return null;
+    }
+
+    return recentSuggestions.isEmpty ? fallback : recentSuggestions;
   }
 }

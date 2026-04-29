@@ -18,15 +18,31 @@ void main() {
       expect(controller.state.selectAllOnOpen, isFalse);
     });
 
-    test('opens active task with selected current text', () async {
-      final client = _FakeQuickEntryClient();
-      final controller = _controller(client);
+    test(
+      'opens active task with selected current text and recent tasks',
+      () async {
+        final client = _FakeQuickEntryClient();
+        final controller = _controller(client);
 
-      await controller.open(_snapshot(activeTask: _activeTask('Write docs')));
+        await controller.open(
+          _snapshot(
+            activeTask: _activeTask('Write docs'),
+            recentSuggestions: [
+              _suggestion('Fix bug'),
+              _suggestion('Write docs'),
+            ],
+          ),
+        );
 
-      expect(controller.state.text, 'Write docs');
-      expect(controller.state.selectAllOnOpen, isTrue);
-    });
+        expect(controller.state.text, 'Write docs');
+        expect(
+          controller.state.suggestions.map((suggestion) => suggestion.taskText),
+          ['Fix bug', 'Write docs'],
+        );
+        expect(controller.state.highlightedIndex, isNull);
+        expect(controller.state.selectAllOnOpen, isTrue);
+      },
+    );
 
     test('reopening while open preserves partial input', () async {
       final client = _FakeQuickEntryClient();
@@ -70,6 +86,31 @@ void main() {
       expect(controller.state.highlightedIndex, 1);
     });
 
+    test('arrow keys select from an unhighlighted recent task list', () async {
+      final client = _FakeQuickEntryClient();
+      final recentSuggestions = [_suggestion('One'), _suggestion('Two')];
+      final downController = _controller(client);
+      await downController.open(
+        _snapshot(
+          activeTask: _activeTask('Existing'),
+          recentSuggestions: recentSuggestions,
+        ),
+      );
+      final upController = _controller(client);
+      await upController.open(
+        _snapshot(
+          activeTask: _activeTask('Existing'),
+          recentSuggestions: recentSuggestions,
+        ),
+      );
+
+      downController.moveHighlight(1);
+      upController.moveHighlight(-1);
+
+      expect(downController.state.highlightedIndex, 0);
+      expect(upController.state.highlightedIndex, 1);
+    });
+
     test('rejects empty submissions without calling the client', () async {
       final client = _FakeQuickEntryClient();
       final controller = _controller(client);
@@ -103,6 +144,24 @@ void main() {
       },
     );
 
+    test('submits active task text when recent tasks are visible', () async {
+      final client = _FakeQuickEntryClient();
+      final controller = _controller(client);
+      await controller.open(
+        _snapshot(
+          activeTask: _activeTask('Write docs'),
+          recentSuggestions: [
+            _suggestion('Fix bug'),
+            _suggestion('Write docs'),
+          ],
+        ),
+      );
+
+      await controller.submit();
+
+      expect(client.submittedTexts, ['Write docs']);
+    });
+
     test('submits raw text when no suggestion is highlighted', () async {
       final client = _FakeQuickEntryClient();
       final controller = _controller(client);
@@ -112,6 +171,42 @@ void main() {
       await controller.submit();
 
       expect(client.submittedTexts, ['Write docs']);
+    });
+
+    test('exact-only filtered match falls back to recent tasks', () async {
+      final client = _FakeQuickEntryClient(
+        suggestionsByQuery: {
+          'Write docs': [_suggestion('Write docs')],
+          '': [_suggestion('Fix bug'), _suggestion('Write docs')],
+        },
+      );
+      final controller = _controller(client);
+      await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+
+      await controller.updateText('Write docs');
+
+      expect(client.suggestionQueries, ['Write docs', '']);
+      expect(
+        controller.state.suggestions.map((suggestion) => suggestion.taskText),
+        ['Fix bug', 'Write docs'],
+      );
+      expect(controller.state.highlightedIndex, isNull);
+    });
+
+    test('single partial match remains filtered and highlighted', () async {
+      final client = _FakeQuickEntryClient(
+        suggestionsByQuery: {
+          'wr': [_suggestion('Write docs')],
+        },
+      );
+      final controller = _controller(client);
+      await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+
+      await controller.updateText('wr');
+
+      expect(client.suggestionQueries, ['wr']);
+      expect(controller.state.suggestions.single.taskText, 'Write docs');
+      expect(controller.state.highlightedIndex, 0);
     });
 
     test('ignores stale autocomplete responses after newer input', () async {
@@ -131,6 +226,28 @@ void main() {
       client.completeRequest(1, [_suggestion('Fresh result')]);
       await secondUpdate;
       expect(controller.state.suggestions.single.taskText, 'Fresh result');
+    });
+
+    test('ignores stale exact-match fallback responses', () async {
+      final client = _DelayedQuickEntryClient();
+      final controller = _controller(client);
+      await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+
+      final firstUpdate = controller.updateText('Write docs');
+      await client.waitForRequests(1);
+      client.completeRequest(0, [_suggestion('Write docs')]);
+      await client.waitForRequests(2);
+
+      final secondUpdate = controller.updateText('wr');
+      await client.waitForRequests(3);
+
+      client.completeRequest(1, [_suggestion('Fix bug')]);
+      await firstUpdate;
+      expect(controller.state.suggestions, isEmpty);
+
+      client.completeRequest(2, [_suggestion('Write docs')]);
+      await secondUpdate;
+      expect(controller.state.suggestions.single.taskText, 'Write docs');
     });
 
     test('ignores stale autocomplete responses after close', () async {
@@ -187,11 +304,15 @@ QuickEntryController _controller(
   );
 }
 
-AppStateSnapshot _snapshot({ActiveTask? activeTask}) {
+AppStateSnapshot _snapshot({
+  ActiveTask? activeTask,
+  List<AutocompleteSuggestion> recentSuggestions = const [],
+}) {
   return AppStateSnapshot(
     activeTask: activeTask,
     runtimeState: RuntimeState(),
     settings: AppSettings.defaults,
+    recentSuggestions: recentSuggestions,
   );
 }
 
@@ -214,16 +335,22 @@ AutocompleteSuggestion _suggestion(String text) {
 }
 
 final class _FakeQuickEntryClient implements QuickEntryClient {
-  _FakeQuickEntryClient({this.suggestions = const []});
+  _FakeQuickEntryClient({
+    this.suggestions = const [],
+    this.suggestionsByQuery = const {},
+  });
 
   final List<AutocompleteSuggestion> suggestions;
+  final Map<String, List<AutocompleteSuggestion>> suggestionsByQuery;
+  final List<String> suggestionQueries = [];
   final List<String> submittedTexts = [];
 
   @override
   Future<List<AutocompleteSuggestion>> autocompleteSuggestions(
     String query,
   ) async {
-    return suggestions;
+    suggestionQueries.add(query);
+    return suggestionsByQuery[query] ?? suggestions;
   }
 
   @override

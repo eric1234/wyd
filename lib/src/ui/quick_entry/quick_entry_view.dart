@@ -133,44 +133,54 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
                   ],
                 ),
                 if (suggestions.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Material(
-                    borderRadius: BorderRadius.circular(8),
-                    clipBehavior: Clip.antiAlias,
-                    color: colorScheme.surfaceContainer,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxHeight: _suggestionListMaxHeight,
-                      ),
-                      child: ListView.builder(
-                        padding: EdgeInsets.zero,
-                        shrinkWrap: true,
-                        itemCount: suggestions.length,
-                        itemBuilder: (context, index) {
-                          final suggestion = suggestions[index];
-                          final highlighted = index == _state.highlightedIndex;
-                          return InkWell(
-                            onTap: () => widget.controller.acceptSuggestion(
-                              index,
-                              submitNow: true,
-                            ),
-                            child: Container(
-                              height: _suggestionRowHeight,
-                              alignment: Alignment.centerLeft,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
+                  const SizedBox(height: 12),
+                  Text(
+                    'Recent Tasks',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Flexible(
+                    child: Material(
+                      borderRadius: BorderRadius.circular(8),
+                      clipBehavior: Clip.antiAlias,
+                      color: colorScheme.surfaceContainer,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxHeight: _suggestionListMaxHeight,
+                        ),
+                        child: ListView.builder(
+                          padding: EdgeInsets.zero,
+                          shrinkWrap: true,
+                          itemCount: suggestions.length,
+                          itemBuilder: (context, index) {
+                            final suggestion = suggestions[index];
+                            final highlighted =
+                                index == _state.highlightedIndex;
+                            return InkWell(
+                              onTap: () => widget.controller.acceptSuggestion(
+                                index,
+                                submitNow: true,
                               ),
-                              color: highlighted
-                                  ? colorScheme.secondaryContainer
-                                  : null,
-                              child: Text(
-                                suggestion.taskText,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: Container(
+                                height: _suggestionRowHeight,
+                                alignment: Alignment.centerLeft,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                color: highlighted
+                                    ? colorScheme.secondaryContainer
+                                    : null,
+                                child: Text(
+                                  suggestion.taskText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),

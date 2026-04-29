@@ -93,7 +93,8 @@ void main() {
 
       await harness.controller.openQuickEntry();
 
-      expect(harness.controller.quickEntry.state.suggestions, isEmpty);
+      expect(harness.controller.quickEntry.state.suggestions, isNotEmpty);
+      expect(harness.controller.quickEntry.state.highlightedIndex, isNull);
       expect(
         harness.window.openedConfigurations.last.height,
         WindowRoleConfiguration.quickEntryHeight,

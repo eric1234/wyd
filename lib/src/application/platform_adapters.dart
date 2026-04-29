@@ -37,7 +37,7 @@ final class WindowRoleConfiguration {
   });
 
   static const quickEntryWidth = 420.0;
-  static const quickEntryHeight = 304.0;
+  static const quickEntryHeight = 360.0;
 
   factory WindowRoleConfiguration.quickEntry() {
     return const WindowRoleConfiguration(

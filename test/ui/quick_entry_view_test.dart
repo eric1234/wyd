@@ -58,8 +58,67 @@ void main() {
     await tester.tap(find.text('Submit'));
     await tester.pump();
 
+    expect(find.text('Recent Tasks'), findsOneWidget);
     expect(find.text('Fix bug'), findsWidgets);
     expect(client.submittedTexts, ['Fix bug']);
+  });
+
+  testWidgets('Enter submits active task text with visible recent tasks', (
+    tester,
+  ) async {
+    final client = _FakeQuickEntryClient();
+    final controller = QuickEntryController(
+      client: client,
+      onSubmitted: (_) async {},
+    );
+    await controller.open(
+      _snapshot(
+        activeTask: _activeTask('Write docs'),
+        recentSuggestions: [_suggestion('Fix bug')],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    expect(find.text('Recent Tasks'), findsOneWidget);
+    expect(find.text('Fix bug'), findsOneWidget);
+    expect(client.submittedTexts, ['Write docs']);
+  });
+
+  testWidgets('does not overflow with five recent tasks in compact height', (
+    tester,
+  ) async {
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(
+      const Size(WindowRoleConfiguration.quickEntryWidth, 304),
+    );
+    final controller = QuickEntryController(
+      client: _FakeQuickEntryClient(),
+      onSubmitted: (_) async {},
+    );
+    await controller.open(
+      _snapshot(
+        activeTask: _activeTask('Write docs'),
+        recentSuggestions: List.generate(
+          defaultAutocompleteSuggestionLimit,
+          (index) => _suggestion('Task $index'),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Recent Tasks'), findsOneWidget);
   });
 
   testWidgets('pressing Enter submits raw task text from the field', (
@@ -144,11 +203,15 @@ void main() {
   });
 }
 
-AppStateSnapshot _snapshot({ActiveTask? activeTask}) {
+AppStateSnapshot _snapshot({
+  ActiveTask? activeTask,
+  List<AutocompleteSuggestion> recentSuggestions = const [],
+}) {
   return AppStateSnapshot(
     activeTask: activeTask,
     runtimeState: RuntimeState(),
     settings: AppSettings.defaults,
+    recentSuggestions: recentSuggestions,
   );
 }
 

@@ -2,6 +2,10 @@
 
 `wyd` stands for "What's ya doin?" It is a tray-based desktop time tracker built with Flutter and Dart that stays out of the way in the system tray and periodically asks the user to confirm or correct the current task.
 
+## History
+
+`wyd` is the spiritual successor to [`wd`](https://github.com/eric1234/wd), an Electron-based version of the same idea that built about a decade earlier. This implementation moves the app to Flutter because Electron proved too bulky and awkward for a small utility that is meant to live quietly in the system tray.
+
 ## Getting Started
 
 1. Install the Flutter SDK from the official Flutter installation guide for your platform.
@@ -69,25 +73,6 @@ WYD_INTEGRATION_DEVICE=macos ./tool/run_integration_tests.sh
 ```
 
 This per-file runner is the standard project workflow for all platforms. It avoids a Flutter desktop integration-test harness issue where `flutter test integration_test -d linux` can pass the first file and then fail a later app launch with `Error waiting for a debug connection`.
-
-## Platform Capabilities
-
-Linux currently supports the required tray workflow, local SQLite persistence, hidden startup, single-instance activation routing, quick entry, nag timeout, reports, settings, recovery, and XDG autostart-based start-at-login.
-
-macOS currently supports the tray/menu-bar workflow, local SQLite persistence, hidden startup, LaunchServices reopen routing through the single-instance activation path, quick entry, nag timeout, reports, settings, recovery, Cmd+Q/App menu quit routing through graceful exit, and native sleep/lock event routing.
-
-The current Linux implementation uses the primary Flutter window for quick entry and separate warmed child windows for report/settings. The child windows are preloaded hidden so first visible use is responsive, then report/settings data is refreshed when the warmed window is actually shown.
-
-The following optional capabilities are intentionally disabled unless a reliable platform adapter is added for the target session:
-
-- Lock/sleep detection: supported on macOS through native workspace/session notifications; unsupported by default on other platforms.
-- Start at login: supported on Linux through XDG autostart; unsupported on macOS until a packaging-safe login item implementation is added.
-- Recent typing detection: unsupported by default, so typing deferral is disabled in settings and nags show normally.
-- Tray-relative popup positioning: unsupported by default; popup windows are centered through `window_manager`.
-
-Integration tests use fake platform adapters for workflows that are unreliable in headless or sessionless CI. Real tray behavior still requires a manual smoke pass on the target desktop session.
-
-See `PROJECT_SPEC.md` for the product and implementation spec.
 
 ## License
 

@@ -18,7 +18,7 @@ void main() {
       await controller.open();
 
       expect(controller.state.reminderIntervalMinutes, '25');
-      expect(controller.state.autocompleteLookbackDays, '3');
+      expect(controller.state.autocompleteLookbackDays, '30');
       expect(controller.state.loading, isFalse);
     });
 
@@ -71,7 +71,7 @@ void main() {
       );
       expect(
         controller.state.messageFor(SettingsField.autocompleteLookbackDays),
-        'Autocomplete lookback must be between 1 and 30.',
+        'Autocomplete lookback must be between 1 and 365.',
       );
       expect(
         controller.state.messageFor(SettingsField.responseTimeoutMinutes),

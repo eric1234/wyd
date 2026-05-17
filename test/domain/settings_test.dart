@@ -7,7 +7,7 @@ void main() {
       const settings = AppSettings.defaults;
 
       expect(settings.reminderIntervalMinutes, 15);
-      expect(settings.autocompleteLookbackDays, 3);
+      expect(settings.autocompleteLookbackDays, 30);
       expect(settings.responseTimeoutMinutes, 1);
       expect(settings.typingDeferralSeconds, 5);
       expect(settings.startAtLogin, isFalse);
@@ -17,7 +17,7 @@ void main() {
     test('allows inclusive validation boundaries', () {
       const settings = AppSettings(
         reminderIntervalMinutes: AppSettings.maxReminderIntervalMinutes,
-        autocompleteLookbackDays: AppSettings.minAutocompleteLookbackDays,
+        autocompleteLookbackDays: AppSettings.maxAutocompleteLookbackDays,
         responseTimeoutMinutes: AppSettings.maxResponseTimeoutMinutes,
         typingDeferralSeconds: AppSettings.minTypingDeferralSeconds,
       );
@@ -28,7 +28,7 @@ void main() {
     test('reports range validation issues', () {
       const settings = AppSettings(
         reminderIntervalMinutes: 0,
-        autocompleteLookbackDays: 31,
+        autocompleteLookbackDays: 366,
         responseTimeoutMinutes: 0,
         typingDeferralSeconds: 31,
       );

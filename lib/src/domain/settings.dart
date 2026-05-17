@@ -23,7 +23,7 @@ final class AppSettings {
   });
 
   static const defaultReminderIntervalMinutes = 15;
-  static const defaultAutocompleteLookbackDays = 3;
+  static const defaultAutocompleteLookbackDays = 30;
   static const defaultResponseTimeoutMinutes = 1;
   static const defaultTypingDeferralSeconds = 5;
   static const defaultStartAtLogin = false;
@@ -31,7 +31,7 @@ final class AppSettings {
   static const minReminderIntervalMinutes = 1;
   static const maxReminderIntervalMinutes = 240;
   static const minAutocompleteLookbackDays = 1;
-  static const maxAutocompleteLookbackDays = 30;
+  static const maxAutocompleteLookbackDays = 365;
   static const minResponseTimeoutMinutes = 1;
   static const maxResponseTimeoutMinutes = 60;
   static const minTypingDeferralSeconds = 0;

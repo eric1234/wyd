@@ -9,7 +9,7 @@ import '../../domain/domain.dart';
 final class AppDatabase {
   AppDatabase._(this.database);
 
-  static const schemaVersion = 1;
+  static const schemaVersion = 2;
   static const databaseFileName = 'wyd.sqlite';
 
   static bool _ffiInitialized = false;
@@ -142,6 +142,60 @@ CREATE TABLE app_state (
       'clean_shutdown': 1,
     });
 
+    await _createSettingsTable(database);
+  }
+
+  static Future<void> _upgradeDatabase(
+    Database database,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (newVersion != schemaVersion) {
+      throw UnsupportedError(
+        'Unsupported database migration from $oldVersion to $newVersion.',
+      );
+    }
+
+    var currentVersion = oldVersion;
+    if (currentVersion < 2) {
+      await _upgradeToV2(database);
+      currentVersion = 2;
+    }
+
+    if (currentVersion == newVersion) {
+      return;
+    }
+
+    throw UnsupportedError(
+      'Unsupported database migration from $oldVersion to $newVersion.',
+    );
+  }
+
+  static Future<void> _upgradeToV2(Database database) async {
+    await database.execute('ALTER TABLE settings RENAME TO settings_v1');
+    await _createSettingsTable(database);
+    await database.execute('''
+INSERT INTO settings (
+  id,
+  reminder_interval_minutes,
+  autocomplete_lookback_days,
+  response_timeout_minutes,
+  typing_deferral_seconds,
+  start_at_login
+)
+SELECT
+  id,
+  reminder_interval_minutes,
+  autocomplete_lookback_days,
+  response_timeout_minutes,
+  typing_deferral_seconds,
+  start_at_login
+FROM settings_v1
+''');
+    await database.execute('DROP TABLE settings_v1');
+  }
+
+  static Future<void> _createSettingsTable(Database database) async {
     await database.execute('''
 CREATE TABLE settings (
   id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -153,15 +207,5 @@ CREATE TABLE settings (
   CHECK (reminder_interval_minutes >= response_timeout_minutes)
 )
 ''');
-  }
-
-  static Future<void> _upgradeDatabase(
-    Database database,
-    int oldVersion,
-    int newVersion,
-  ) async {
-    throw UnsupportedError(
-      'Unsupported database migration from $oldVersion to $newVersion.',
-    );
   }
 }

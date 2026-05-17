@@ -186,7 +186,7 @@ void main() {
         await database.database.insert('settings', {
           'id': 1,
           'reminder_interval_minutes': 15,
-          'autocomplete_lookback_days': 31,
+          'autocomplete_lookback_days': 366,
           'response_timeout_minutes': 1,
           'typing_deferral_seconds': 5,
           'start_at_login': 0,
@@ -217,6 +217,35 @@ void main() {
           ),
           throwsA(isA<UnsupportedError>()),
         );
+      } finally {
+        await database?.close();
+        if (await tempDirectory.exists()) {
+          await tempDirectory.delete(recursive: true);
+        }
+      }
+    });
+
+    test('migrates version 1 settings autocomplete max', () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'wyd_sqlite_v2_migration_',
+      );
+      final databasePath = p.join(tempDirectory.path, 'wyd.sqlite');
+      AppDatabase? database;
+
+      try {
+        await _createVersion1Database(databasePath);
+
+        database = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+        );
+        final repository = SqliteSettingsRepository(database.database);
+
+        expect((await repository.read()).autocompleteLookbackDays, 30);
+
+        await repository.save(const AppSettings(autocompleteLookbackDays: 365));
+
+        expect((await repository.read()).autocompleteLookbackDays, 365);
       } finally {
         await database?.close();
         if (await tempDirectory.exists()) {
@@ -428,7 +457,7 @@ void main() {
       await repository.save(
         const AppSettings(
           reminderIntervalMinutes: 20,
-          autocompleteLookbackDays: 10,
+          autocompleteLookbackDays: 365,
           responseTimeoutMinutes: 5,
           typingDeferralSeconds: 0,
           startAtLogin: true,
@@ -438,7 +467,7 @@ void main() {
       final settings = await repository.read();
 
       expect(settings.reminderIntervalMinutes, 20);
-      expect(settings.autocompleteLookbackDays, 10);
+      expect(settings.autocompleteLookbackDays, 365);
       expect(settings.responseTimeoutMinutes, 5);
       expect(settings.typingDeferralSeconds, 0);
       expect(settings.startAtLogin, isTrue);
@@ -470,4 +499,37 @@ void main() {
       expect(await repository.allEvents(), isEmpty);
     });
   });
+}
+
+Future<void> _createVersion1Database(String databasePath) async {
+  sqfliteFfiInit();
+  final database = await databaseFactoryFfi.openDatabase(
+    databasePath,
+    options: OpenDatabaseOptions(
+      version: 1,
+      onCreate: (database, version) async {
+        await database.execute('''
+CREATE TABLE settings (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  reminder_interval_minutes INTEGER NOT NULL CHECK(reminder_interval_minutes BETWEEN 1 AND 240),
+  autocomplete_lookback_days INTEGER NOT NULL CHECK(autocomplete_lookback_days BETWEEN 1 AND 30),
+  response_timeout_minutes INTEGER NOT NULL CHECK(response_timeout_minutes BETWEEN 1 AND 60),
+  typing_deferral_seconds INTEGER NOT NULL CHECK(typing_deferral_seconds BETWEEN 0 AND 30),
+  start_at_login INTEGER NOT NULL CHECK(start_at_login IN (0, 1)),
+  CHECK (reminder_interval_minutes >= response_timeout_minutes)
+)
+''');
+        await database.insert('settings', {
+          'id': 1,
+          'reminder_interval_minutes': 15,
+          'autocomplete_lookback_days': 30,
+          'response_timeout_minutes': 1,
+          'typing_deferral_seconds': 5,
+          'start_at_login': 0,
+        });
+      },
+    ),
+  );
+
+  await database.close();
 }

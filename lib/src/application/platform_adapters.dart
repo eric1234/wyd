@@ -174,14 +174,14 @@ final class UnsupportedPowerEventAdapter implements PowerEventAdapter {
   Stream<PowerEvent> get events => const Stream.empty();
 }
 
-abstract interface class TypingActivityDetector {
-  Future<DateTime?> lastTypingActivityUtc();
+abstract interface class UserIdleDetector {
+  Future<Duration?> promptDeferralFor(Duration minimumIdleDuration);
 }
 
-final class UnsupportedTypingActivityDetector
-    implements TypingActivityDetector {
-  const UnsupportedTypingActivityDetector();
+final class UnsupportedUserIdleDetector implements UserIdleDetector {
+  const UnsupportedUserIdleDetector();
 
   @override
-  Future<DateTime?> lastTypingActivityUtc() async => null;
+  Future<Duration?> promptDeferralFor(Duration minimumIdleDuration) async =>
+      null;
 }

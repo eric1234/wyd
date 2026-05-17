@@ -28,20 +28,20 @@ final class NagScheduler {
   NagScheduler({
     required Clock clock,
     required SchedulerTimerFactory timerFactory,
-    required TypingActivityDetector typingActivityDetector,
+    required UserIdleDetector userIdleDetector,
     required Future<AppStateSnapshot> Function() onShowPrompt,
     required Future<AppStateSnapshot> Function() onPromptTimedOut,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) : _clock = clock,
        _timerFactory = timerFactory,
-       _typingActivityDetector = typingActivityDetector,
+       _userIdleDetector = userIdleDetector,
        _onShowPrompt = onShowPrompt,
        _onPromptTimedOut = onPromptTimedOut,
        _onError = onError;
 
   final Clock _clock;
   final SchedulerTimerFactory _timerFactory;
-  final TypingActivityDetector _typingActivityDetector;
+  final UserIdleDetector _userIdleDetector;
   final Future<AppStateSnapshot> Function() _onShowPrompt;
   final Future<AppStateSnapshot> Function() _onPromptTimedOut;
   final void Function(Object error, StackTrace stackTrace)? _onError;
@@ -118,7 +118,7 @@ final class NagScheduler {
     }
 
     try {
-      final deferral = await _typingDeferral(snapshot);
+      final deferral = await _activityDeferral(snapshot);
       if (!_isCurrent(generation)) {
         return;
       }
@@ -157,26 +157,24 @@ final class NagScheduler {
     }
   }
 
-  Future<Duration?> _typingDeferral(AppStateSnapshot snapshot) async {
-    if (!snapshot.capabilities.supportsTypingActivity ||
+  Future<Duration?> _activityDeferral(AppStateSnapshot snapshot) async {
+    if (!snapshot.capabilities.supportsUserIdleDetection ||
         snapshot.settings.typingDeferralSeconds <= 0) {
       return null;
     }
 
-    final lastTypingAt = await _typingActivityDetector.lastTypingActivityUtc();
-    if (lastTypingAt == null) {
+    try {
+      final deferral = await _userIdleDetector.promptDeferralFor(
+        Duration(seconds: snapshot.settings.typingDeferralSeconds),
+      );
+      if (deferral == null || deferral <= Duration.zero) {
+        return null;
+      }
+      return deferral;
+    } catch (error, stackTrace) {
+      _onError?.call(error, stackTrace);
       return null;
     }
-
-    final idleAt = lastTypingAt.toUtc().add(
-      Duration(seconds: snapshot.settings.typingDeferralSeconds),
-    );
-    final now = _clock.nowUtc();
-    if (!idleAt.isAfter(now)) {
-      return null;
-    }
-
-    return idleAt.difference(now);
   }
 
   Duration _durationUntil(DateTime dueAtUtc) {

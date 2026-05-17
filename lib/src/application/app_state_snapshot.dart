@@ -2,14 +2,14 @@ import '../domain/domain.dart';
 
 final class PlatformCapabilities {
   const PlatformCapabilities({
-    this.supportsTypingActivity = false,
+    this.supportsUserIdleDetection = false,
     this.supportsStartAtLogin = false,
     this.supportsPowerEvents = false,
     this.supportsTrayClickActions = false,
     this.supportsTrayRelativePositioning = false,
   });
 
-  final bool supportsTypingActivity;
+  final bool supportsUserIdleDetection;
   final bool supportsStartAtLogin;
   final bool supportsPowerEvents;
   final bool supportsTrayClickActions;
@@ -18,7 +18,7 @@ final class PlatformCapabilities {
   @override
   bool operator ==(Object other) {
     return other is PlatformCapabilities &&
-        supportsTypingActivity == other.supportsTypingActivity &&
+        supportsUserIdleDetection == other.supportsUserIdleDetection &&
         supportsStartAtLogin == other.supportsStartAtLogin &&
         supportsPowerEvents == other.supportsPowerEvents &&
         supportsTrayClickActions == other.supportsTrayClickActions &&
@@ -29,7 +29,7 @@ final class PlatformCapabilities {
   @override
   int get hashCode {
     return Object.hash(
-      supportsTypingActivity,
+      supportsUserIdleDetection,
       supportsStartAtLogin,
       supportsPowerEvents,
       supportsTrayClickActions,

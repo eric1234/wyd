@@ -494,7 +494,7 @@ final class _Harness {
         ? NagScheduler(
             clock: clock,
             timerFactory: timers,
-            typingActivityDetector: const UnsupportedTypingActivityDetector(),
+            userIdleDetector: const UnsupportedUserIdleDetector(),
             onShowPrompt: () => controller.showNagPrompt(),
             onPromptTimedOut: () => controller.nagPromptTimedOut(),
             onError: (error, stackTrace) =>

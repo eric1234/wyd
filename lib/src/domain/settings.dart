@@ -78,7 +78,7 @@ final class AppSettings {
       value: typingDeferralSeconds,
       min: minTypingDeferralSeconds,
       max: maxTypingDeferralSeconds,
-      label: 'Typing deferral',
+      label: 'Activity deferral',
     );
 
     if (reminderIntervalMinutes < responseTimeoutMinutes) {

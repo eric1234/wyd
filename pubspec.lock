@@ -495,6 +495,46 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.4.0+1"
+  system_idle:
+    dependency: "direct main"
+    description:
+      name: system_idle
+      sha256: "2ccd9518a4412bcb3354558de0fdc85d7b03b989b833a1129300293c9d557620"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.0"
+  system_idle_linux:
+    dependency: transitive
+    description:
+      name: system_idle_linux
+      sha256: "6b1e875d9e75151088b9bdfbafab952b198e88e93f00c2a5002e31621ed00d5c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+  system_idle_macos:
+    dependency: transitive
+    description:
+      name: system_idle_macos
+      sha256: db3534e47385110b2590907db163b029cd22e4e9c2cddd683ae76d40ac2fce27
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+  system_idle_platform_interface:
+    dependency: transitive
+    description:
+      name: system_idle_platform_interface
+      sha256: "0a9b4ee1aec82563f44339e59b96285ff6a5af451cd4355abcf731435276c6a1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+  system_idle_windows:
+    dependency: transitive
+    description:
+      name: system_idle_windows
+      sha256: "83f38b9486f46d48200d9075876022e026c7432740e5a469ed56c1591625f955"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   term_glyph:
     dependency: transitive
     description:
@@ -559,6 +599,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.0"
+  win32:
+    dependency: transitive
+    description:
+      name: win32
+      sha256: d7cb55e04cd34096cd3a79b3330245f54cb96a370a1c27adb3c84b917de8b08e
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.15.0"
   window_manager:
     dependency: "direct main"
     description:

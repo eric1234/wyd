@@ -17,10 +17,7 @@ void main() {
       expect(bindings.capabilities.supportsTrayClickActions, isFalse);
       expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
       expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
-      expect(
-        bindings.typingActivityDetector,
-        isA<UnsupportedTypingActivityDetector>(),
-      );
+      expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
       expect(
         bindings.nativeLifecycleAdapter,
         isA<UnsupportedNativeLifecycleAdapter>(),
@@ -35,7 +32,7 @@ void main() {
 
       expect(bindings.capabilities.supportsStartAtLogin, isFalse);
       expect(bindings.capabilities.supportsPowerEvents, isTrue);
-      expect(bindings.capabilities.supportsTypingActivity, isFalse);
+      expect(bindings.capabilities.supportsUserIdleDetection, isFalse);
       expect(bindings.capabilities.supportsTrayClickActions, isTrue);
       expect(bindings.capabilities.supportsTrayRelativePositioning, isFalse);
       expect(
@@ -43,10 +40,7 @@ void main() {
         isA<UnsupportedStartupAtLoginAdapter>(),
       );
       expect(bindings.powerEventAdapter, isA<EventChannelPowerEventAdapter>());
-      expect(
-        bindings.typingActivityDetector,
-        isA<UnsupportedTypingActivityDetector>(),
-      );
+      expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
       expect(
         bindings.nativeLifecycleAdapter,
         isA<MethodChannelNativeLifecycleAdapter>(),
@@ -72,6 +66,19 @@ void main() {
         isA<UnsupportedNativeLifecycleAdapter>(),
       );
     });
+
+    test('exposes injected user idle detector capability', () {
+      final userIdleDetector = _FakeUserIdleDetector();
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        supportsUserIdleDetection: true,
+        userIdleDetector: userIdleDetector,
+      );
+
+      expect(bindings.capabilities.supportsUserIdleDetection, isTrue);
+      expect(bindings.userIdleDetector, same(userIdleDetector));
+    });
   });
 }
 
@@ -81,4 +88,10 @@ final class _FakeStartupAtLoginAdapter implements StartupAtLoginAdapter {
 
   @override
   Future<void> setEnabled(bool enabled) async {}
+}
+
+final class _FakeUserIdleDetector implements UserIdleDetector {
+  @override
+  Future<Duration?> promptDeferralFor(Duration minimumIdleDuration) async =>
+      null;
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../application/application.dart';
 import 'event_channel_power_event_adapter.dart';
 import 'method_channel_native_lifecycle_adapter.dart';
+import 'system_idle_user_idle_detector.dart';
 import 'xdg_autostart_startup_adapter.dart';
 
 final class DesktopPlatformBindings {
@@ -10,14 +11,17 @@ final class DesktopPlatformBindings {
     required this.capabilities,
     required this.startupAtLoginAdapter,
     required this.powerEventAdapter,
-    required this.typingActivityDetector,
+    required this.userIdleDetector,
     required this.nativeLifecycleAdapter,
   });
 
-  factory DesktopPlatformBindings.current() {
+  static Future<DesktopPlatformBindings> current() async {
+    final userIdleDetector = await SystemIdleUserIdleDetector.create();
     return DesktopPlatformBindings.forPlatform(
       isLinux: Platform.isLinux,
       isMacOS: Platform.isMacOS,
+      supportsUserIdleDetection: userIdleDetector != null,
+      userIdleDetector: userIdleDetector ?? const UnsupportedUserIdleDetector(),
     );
   }
 
@@ -25,10 +29,13 @@ final class DesktopPlatformBindings {
     required bool isLinux,
     required bool isMacOS,
     StartupAtLoginAdapter Function()? linuxStartupAtLoginFactory,
+    bool supportsUserIdleDetection = false,
+    UserIdleDetector userIdleDetector = const UnsupportedUserIdleDetector(),
     bool? supportsTrayClickActions,
   }) {
     return DesktopPlatformBindings(
       capabilities: PlatformCapabilities(
+        supportsUserIdleDetection: supportsUserIdleDetection,
         supportsStartAtLogin: isLinux,
         supportsPowerEvents: isMacOS,
         supportsTrayClickActions: supportsTrayClickActions ?? isMacOS,
@@ -40,7 +47,7 @@ final class DesktopPlatformBindings {
       powerEventAdapter: isMacOS
           ? const EventChannelPowerEventAdapter()
           : const UnsupportedPowerEventAdapter(),
-      typingActivityDetector: const UnsupportedTypingActivityDetector(),
+      userIdleDetector: userIdleDetector,
       nativeLifecycleAdapter: isMacOS
           ? MethodChannelNativeLifecycleAdapter()
           : const UnsupportedNativeLifecycleAdapter(),
@@ -50,6 +57,6 @@ final class DesktopPlatformBindings {
   final PlatformCapabilities capabilities;
   final StartupAtLoginAdapter startupAtLoginAdapter;
   final PowerEventAdapter powerEventAdapter;
-  final TypingActivityDetector typingActivityDetector;
+  final UserIdleDetector userIdleDetector;
   final NativeLifecycleAdapter nativeLifecycleAdapter;
 }

@@ -49,7 +49,7 @@ Future<void> _runTrayApp() async {
 
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
-  final platformBindings = DesktopPlatformBindings.current();
+  final platformBindings = await DesktopPlatformBindings.current();
   final trackerService = _trackerService(
     database,
     clock,
@@ -68,7 +68,7 @@ Future<void> _runTrayApp() async {
   final nagScheduler = NagScheduler(
     clock: clock,
     timerFactory: const DartSchedulerTimerFactory(),
-    typingActivityDetector: platformBindings.typingActivityDetector,
+    userIdleDetector: platformBindings.userIdleDetector,
     onShowPrompt: () => controller.showNagPrompt(),
     onPromptTimedOut: () => controller.nagPromptTimedOut(),
     onError: (error, stackTrace) =>
@@ -134,7 +134,7 @@ Future<void> _runRoleWindow(
 }) async {
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
-  final platformBindings = DesktopPlatformBindings.current();
+  final platformBindings = await DesktopPlatformBindings.current();
   final trackerService = _trackerService(
     database,
     clock,

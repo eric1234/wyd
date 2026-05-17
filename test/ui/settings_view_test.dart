@@ -21,6 +21,7 @@ void main() {
     expect(find.text('Reminder interval'), findsOneWidget);
     expect(find.text('Autocomplete lookback'), findsOneWidget);
     expect(find.text('Unanswered timeout'), findsOneWidget);
+    expect(find.text('Activity deferral'), findsOneWidget);
     expect(find.text('Allowed: 1-240'), findsNothing);
     expect(find.text('Unsupported on this platform'), findsNWidgets(2));
     expect(find.text('Save'), findsNothing);

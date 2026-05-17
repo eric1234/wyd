@@ -142,14 +142,15 @@ class _SettingsViewState extends State<SettingsView> {
                         _numberField(
                           controller: _typingDeferralController,
                           focusNode: _typingDeferralFocusNode,
-                          label: 'Typing deferral',
+                          label: 'Activity deferral',
                           suffix: 'sec',
                           supportingText:
-                              _state.capabilities.supportsTypingActivity
+                              _state.capabilities.supportsUserIdleDetection
                               ? null
                               : 'Unsupported on this platform',
                           errorField: SettingsField.typingDeferralSeconds,
-                          enabled: _state.capabilities.supportsTypingActivity,
+                          enabled:
+                              _state.capabilities.supportsUserIdleDetection,
                           onChanged: widget.controller.updateTypingDeferral,
                         ),
                       ],

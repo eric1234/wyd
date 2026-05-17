@@ -3,6 +3,7 @@ export 'event_channel_power_event_adapter.dart';
 export 'method_channel_native_lifecycle_adapter.dart';
 export 'method_channel_single_instance_adapter.dart';
 export 'multi_window_adapter.dart';
+export 'system_idle_user_idle_detector.dart';
 export 'tray_manager_adapter.dart';
 export 'unsupported_tray_adapter.dart';
 export 'window_manager_adapter.dart';

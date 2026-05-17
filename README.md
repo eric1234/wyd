@@ -20,10 +20,10 @@ flutter config --enable-macos-desktop
 
 Windows runners are present from Flutter's project template, but the product currently gates the tray app to Linux and macOS while Windows waits for later tray-first lifecycle work.
 
-3. On Debian/Ubuntu Linux development machines, install the desktop build dependencies used by Flutter, the tray plugin, and SQLite native assets:
+3. On Debian/Ubuntu Linux development machines, install the desktop build dependencies used by Flutter, the tray plugin, SQLite native assets, and X11 idle detection:
 
 ```bash
-sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libsqlite3-dev libayatana-appindicator3-dev lld-18
+sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libsqlite3-dev libayatana-appindicator3-dev libxcb1-dev libxcb-screensaver0-dev lld-18
 ```
 
 4. Install project dependencies:

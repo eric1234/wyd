@@ -483,7 +483,7 @@ final class _SettingsDraft {
     final typingDeferral = _parseWholeNumber(
       typingDeferralSeconds,
       field: SettingsField.typingDeferralSeconds,
-      label: 'Typing deferral',
+      label: 'Activity deferral',
       issues: issues,
     );
 

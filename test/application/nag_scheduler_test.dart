@@ -65,10 +65,10 @@ void main() {
       },
     );
 
-    test('defers due reminder when supported typing is recent', () async {
+    test('defers due reminder when idle detector requests deferral', () async {
       final harness = _Harness(
-        typingDetector: _FakeTypingActivityDetector(
-          lastTypingAt: DateTime.utc(2026, 1, 1, 9, 15),
+        userIdleDetector: _FakeUserIdleDetector(
+          deferrals: [const Duration(seconds: 5)],
         ),
       );
       harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
@@ -77,7 +77,7 @@ void main() {
         harness.snapshot(
           activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
           capabilities: const PlatformCapabilities(
-            supportsTypingActivity: true,
+            supportsUserIdleDetection: true,
           ),
         ),
       );
@@ -90,14 +90,34 @@ void main() {
       );
     });
 
-    test(
-      'does not defer reminder when typing capability is unsupported',
-      () async {
-        final harness = _Harness(
-          typingDetector: _FakeTypingActivityDetector(
-            lastTypingAt: DateTime.utc(2026, 1, 1, 9, 15),
+    test('shows due reminder when idle detector permits prompt', () async {
+      final userIdleDetector = _FakeUserIdleDetector(deferrals: [null]);
+      final harness = _Harness(userIdleDetector: userIdleDetector);
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          capabilities: const PlatformCapabilities(
+            supportsUserIdleDetection: true,
           ),
+        ),
+      );
+      await harness.timers.fireFirst();
+
+      expect(harness.showPromptCalls, 1);
+      expect(userIdleDetector.minimumIdleDurations, [
+        const Duration(seconds: 5),
+      ]);
+    });
+
+    test(
+      'does not defer reminder when idle detection capability is unsupported',
+      () async {
+        final userIdleDetector = _FakeUserIdleDetector(
+          deferrals: [const Duration(seconds: 5)],
         );
+        final harness = _Harness(userIdleDetector: userIdleDetector);
         harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
 
         harness.scheduler.update(
@@ -108,6 +128,7 @@ void main() {
         await harness.timers.fireFirst();
 
         expect(harness.showPromptCalls, 1);
+        expect(userIdleDetector.minimumIdleDurations, isEmpty);
       },
     );
 
@@ -186,12 +207,11 @@ void main() {
       expect(harness.timers.activeTimers.single.duration, Duration.zero);
     });
 
-    test('typing deferral setting of zero disables deferral', () async {
-      final harness = _Harness(
-        typingDetector: _FakeTypingActivityDetector(
-          lastTypingAt: DateTime.utc(2026, 1, 1, 9, 15),
-        ),
+    test('activity deferral setting of zero disables deferral', () async {
+      final userIdleDetector = _FakeUserIdleDetector(
+        deferrals: [const Duration(seconds: 5)],
       );
+      final harness = _Harness(userIdleDetector: userIdleDetector);
       harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
 
       harness.scheduler.update(
@@ -199,33 +219,75 @@ void main() {
           activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
           settings: const AppSettings(typingDeferralSeconds: 0),
           capabilities: const PlatformCapabilities(
-            supportsTypingActivity: true,
+            supportsUserIdleDetection: true,
           ),
         ),
       );
       await harness.timers.fireFirst();
 
       expect(harness.showPromptCalls, 1);
+      expect(userIdleDetector.minimumIdleDurations, isEmpty);
     });
 
-    test('ignores obsolete reminder after typing check awaits', () async {
-      final typingDetector = _DelayedTypingActivityDetector();
-      final harness = _Harness(typingDetector: typingDetector);
+    test('re-checks after deferral while activity continues', () async {
+      final harness = _Harness(
+        userIdleDetector: _FakeUserIdleDetector(
+          deferrals: [
+            const Duration(seconds: 5),
+            const Duration(seconds: 2),
+            null,
+          ],
+        ),
+      );
       harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
 
       harness.scheduler.update(
         harness.snapshot(
           activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
           capabilities: const PlatformCapabilities(
-            supportsTypingActivity: true,
+            supportsUserIdleDetection: true,
+          ),
+        ),
+      );
+      await harness.timers.fireFirst();
+
+      expect(harness.showPromptCalls, 0);
+      expect(
+        harness.timers.activeTimers.single.duration,
+        const Duration(seconds: 5),
+      );
+
+      await harness.timers.fireFirst();
+
+      expect(harness.showPromptCalls, 0);
+      expect(
+        harness.timers.activeTimers.single.duration,
+        const Duration(seconds: 2),
+      );
+
+      await harness.timers.fireFirst();
+
+      expect(harness.showPromptCalls, 1);
+    });
+
+    test('ignores obsolete reminder after idle check awaits', () async {
+      final userIdleDetector = _DelayedUserIdleDetector();
+      final harness = _Harness(userIdleDetector: userIdleDetector);
+      harness.clock.current = DateTime.utc(2026, 1, 1, 9, 15);
+
+      harness.scheduler.update(
+        harness.snapshot(
+          activeTask: _activeTask(startedAtUtc: DateTime.utc(2026, 1, 1, 9)),
+          capabilities: const PlatformCapabilities(
+            supportsUserIdleDetection: true,
           ),
         ),
       );
       final firing = harness.timers.fireFirst();
-      await typingDetector.waitForRequest();
+      await userIdleDetector.waitForRequest();
 
       harness.scheduler.update(harness.snapshot(activeTask: null));
-      typingDetector.complete(DateTime.utc(2026, 1, 1, 9, 15));
+      userIdleDetector.complete(const Duration(seconds: 5));
       await firing;
       await Future<void>.delayed(Duration.zero);
 
@@ -298,14 +360,13 @@ void main() {
 }
 
 final class _Harness {
-  _Harness({TypingActivityDetector? typingDetector})
+  _Harness({UserIdleDetector? userIdleDetector})
     : clock = _FakeClock(DateTime.utc(2026, 1, 1, 9, 15)),
       timers = _FakeSchedulerTimerFactory() {
     scheduler = NagScheduler(
       clock: clock,
       timerFactory: timers,
-      typingActivityDetector:
-          typingDetector ?? const UnsupportedTypingActivityDetector(),
+      userIdleDetector: userIdleDetector ?? const UnsupportedUserIdleDetector(),
       onShowPrompt: () {
         showPromptCalls += 1;
         return onShowPrompt();
@@ -372,21 +433,29 @@ final class _FakeClock implements Clock {
   DateTime nowUtc() => current;
 }
 
-final class _FakeTypingActivityDetector implements TypingActivityDetector {
-  const _FakeTypingActivityDetector({this.lastTypingAt});
+final class _FakeUserIdleDetector implements UserIdleDetector {
+  _FakeUserIdleDetector({required List<Duration?> deferrals})
+    : _deferrals = List<Duration?>.of(deferrals);
 
-  final DateTime? lastTypingAt;
+  final List<Duration?> _deferrals;
+  final List<Duration> minimumIdleDurations = [];
 
   @override
-  Future<DateTime?> lastTypingActivityUtc() async => lastTypingAt;
+  Future<Duration?> promptDeferralFor(Duration minimumIdleDuration) async {
+    minimumIdleDurations.add(minimumIdleDuration);
+    if (_deferrals.isEmpty) {
+      return null;
+    }
+    return _deferrals.removeAt(0);
+  }
 }
 
-final class _DelayedTypingActivityDetector implements TypingActivityDetector {
+final class _DelayedUserIdleDetector implements UserIdleDetector {
   final Completer<void> _requestCompleter = Completer<void>();
-  final Completer<DateTime?> _resultCompleter = Completer<DateTime?>();
+  final Completer<Duration?> _resultCompleter = Completer<Duration?>();
 
   @override
-  Future<DateTime?> lastTypingActivityUtc() {
+  Future<Duration?> promptDeferralFor(Duration minimumIdleDuration) {
     if (!_requestCompleter.isCompleted) {
       _requestCompleter.complete();
     }
@@ -395,8 +464,8 @@ final class _DelayedTypingActivityDetector implements TypingActivityDetector {
 
   Future<void> waitForRequest() => _requestCompleter.future;
 
-  void complete(DateTime? lastTypingAt) {
-    _resultCompleter.complete(lastTypingAt);
+  void complete(Duration? deferral) {
+    _resultCompleter.complete(deferral);
   }
 }
 

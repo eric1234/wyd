@@ -79,7 +79,7 @@ void main() {
       );
       expect(
         controller.state.messageFor(SettingsField.typingDeferralSeconds),
-        'Typing deferral must be between 0 and 30.',
+        'Activity deferral must be between 0 and 30.',
       );
     });
 

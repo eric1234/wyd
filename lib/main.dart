@@ -145,9 +145,11 @@ Future<void> _runRoleWindow(
   ReportController? reportController;
   SettingsController? settingsController;
   final closeHandler = HideOnCloseWindowHandler(
-    onBeforeHide: role == WindowRole.settings
-        ? () => settingsController?.commitChanges() ?? Future<void>.value()
-        : null,
+    onBeforeHide: () => _handleRoleWindowBeforeHide(
+      role,
+      reportController: reportController,
+      settingsController: settingsController,
+    ),
   );
   var ready = false;
 
@@ -231,6 +233,21 @@ void _refreshRoleForShow(
       reportController?.refreshForShow();
     case WindowRole.settings:
       settingsController?.refreshForShow();
+    case WindowRole.quickEntry:
+      break;
+  }
+}
+
+Future<void> _handleRoleWindowBeforeHide(
+  WindowRole role, {
+  required ReportController? reportController,
+  required SettingsController? settingsController,
+}) async {
+  switch (role) {
+    case WindowRole.report:
+      reportController?.close();
+    case WindowRole.settings:
+      await settingsController?.commitChanges();
     case WindowRole.quickEntry:
       break;
   }

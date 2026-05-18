@@ -94,6 +94,38 @@ void main() {
       expect(controller.state.selectedDate, today);
     });
 
+    test('refreshForShow preserves selected day while already open', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final controller = ReportController(harness.reportService);
+      final today = harness.reportService.todayLocalDate();
+      final previousDay = DateTime(today.year, today.month, today.day - 1);
+
+      await controller.open();
+      await controller.previousDay();
+      controller.refreshForShow();
+      await pumpEventQueue();
+
+      expect(controller.state.selectedDate, previousDay);
+      expect(controller.state.isOpen, isTrue);
+    });
+
+    test('refreshForShow returns to today after close', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final controller = ReportController(harness.reportService);
+      final today = harness.reportService.todayLocalDate();
+
+      await controller.open();
+      await controller.previousDay();
+      controller.close();
+      controller.refreshForShow();
+      await pumpEventQueue();
+
+      expect(controller.state.selectedDate, today);
+      expect(controller.state.isOpen, isTrue);
+    });
+
     test('keeps report snapshot static while already open', () async {
       final harness = await _Harness.create();
       addTearDown(harness.dispose);

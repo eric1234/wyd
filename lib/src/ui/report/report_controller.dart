@@ -73,7 +73,9 @@ final class ReportController extends ChangeNotifier {
   }
 
   void refreshForShow() {
-    final selected = _state.selectedDate ?? _service.todayLocalDate();
+    final selected = _state.isOpen
+        ? _state.selectedDate ?? _service.todayLocalDate()
+        : _service.todayLocalDate();
     unawaited(loadDate(selected, isOpen: true, clearReport: true));
   }
 

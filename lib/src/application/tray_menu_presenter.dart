@@ -24,4 +24,8 @@ final class TrayMenuPresenter {
   static TrayIconStatus buildIconStatus(AppStateSnapshot snapshot) {
     return snapshot.isTracking ? TrayIconStatus.tracking : TrayIconStatus.idle;
   }
+
+  static String buildTooltip(AppStateSnapshot snapshot) {
+    return snapshot.activeTask?.taskText ?? 'No current task';
+  }
 }

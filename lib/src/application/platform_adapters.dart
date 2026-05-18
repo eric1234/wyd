@@ -22,11 +22,14 @@ abstract interface class TrayAdapter {
   Future<void> initialize(
     List<TrayMenuEntry> entries, {
     required TrayIconStatus iconStatus,
+    required String tooltip,
   });
 
   Future<void> updateMenu(List<TrayMenuEntry> entries);
 
   Future<void> updateIcon(TrayIconStatus iconStatus);
+
+  Future<void> updateTooltip(String tooltip);
 
   Future<void> dispose();
 }

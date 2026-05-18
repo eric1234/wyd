@@ -20,6 +20,7 @@ void main() {
 
       expect(stopTask.enabled, isFalse);
       expect(TrayMenuPresenter.buildIconStatus(snapshot), TrayIconStatus.idle);
+      expect(TrayMenuPresenter.buildTooltip(snapshot), 'No current task');
       expect(menu.map((entry) => entry.label), [
         'Update Task',
         'Stop Task',
@@ -51,6 +52,7 @@ void main() {
         TrayMenuPresenter.buildIconStatus(snapshot),
         TrayIconStatus.tracking,
       );
+      expect(TrayMenuPresenter.buildTooltip(snapshot), 'Write docs');
     });
   });
 

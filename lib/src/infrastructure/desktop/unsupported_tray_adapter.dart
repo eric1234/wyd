@@ -23,6 +23,7 @@ final class UnsupportedTrayAdapter implements TrayAdapter {
   Future<void> initialize(
     List<TrayMenuEntry> entries, {
     required TrayIconStatus iconStatus,
+    required String tooltip,
   }) {
     throw UnsupportedError(reason);
   }
@@ -32,6 +33,9 @@ final class UnsupportedTrayAdapter implements TrayAdapter {
 
   @override
   Future<void> updateIcon(TrayIconStatus iconStatus) async {}
+
+  @override
+  Future<void> updateTooltip(String tooltip) async {}
 
   @override
   Future<void> dispose() async {

@@ -18,6 +18,8 @@ void main() {
       expect(harness.tray.initialized, isTrue);
       expect(harness.tray.initializedIconStatus, TrayIconStatus.idle);
       expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+      expect(harness.tray.initializedTooltip, 'No current task');
+      expect(harness.tray.latestTooltip, 'No current task');
       expect(harness.tray.latestEntries.last.action, TrayMenuAction.exit);
       expect(
         harness.tray.latestEntries
@@ -88,6 +90,7 @@ void main() {
         isTrue,
       );
       expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
+      expect(harness.tray.latestTooltip, 'Write docs');
     });
 
     test('second-instance activation reopens quick entry', () async {
@@ -185,6 +188,7 @@ void main() {
       expect(harness.controller.quickEntry.state.text, isEmpty);
       expect(harness.controller.snapshot!.activeTask, isNull);
       expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+      expect(harness.tray.latestTooltip, 'No current task');
       expect(
         harness.controller.snapshot!.runtimeState.promptState.status,
         PromptStatus.none,
@@ -224,6 +228,7 @@ void main() {
         expect(harness.window.openedRoles, isEmpty);
         expect(harness.window.focusedRoles, [WindowRole.quickEntry]);
         expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+        expect(harness.tray.latestTooltip, 'No current task');
       },
     );
 
@@ -273,6 +278,8 @@ void main() {
         );
         expect(harness.tray.initializedIconStatus, TrayIconStatus.tracking);
         expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
+        expect(harness.tray.initializedTooltip, 'Write docs');
+        expect(harness.tray.latestTooltip, 'Write docs');
         expect(
           harness.timers.activeTimers.single.duration,
           const Duration(minutes: 1),
@@ -458,6 +465,7 @@ void main() {
         ]);
         expect(harness.controller.activeRole, isNull);
         expect(harness.window.closedRoles, contains(WindowRole.quickEntry));
+        expect(harness.tray.latestTooltip, 'Fix bug');
       },
     );
 
@@ -516,6 +524,7 @@ void main() {
       await harness.controller.refreshFromExternalChange();
 
       expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
+      expect(harness.tray.latestTooltip, 'Write docs');
 
       harness.clock.current = harness.clock.current.add(
         const Duration(minutes: 5),
@@ -529,6 +538,7 @@ void main() {
       await harness.controller.refreshFromExternalChange();
 
       expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+      expect(harness.tray.latestTooltip, 'No current task');
     });
 
     test('power event while idle does not append a stop event', () async {
@@ -791,7 +801,10 @@ final class _FakeTrayAdapter implements TrayAdapter {
   List<TrayMenuEntry> latestEntries = const [];
   TrayIconStatus? initializedIconStatus;
   TrayIconStatus? latestIconStatus;
+  String? initializedTooltip;
+  String? latestTooltip;
   final List<TrayIconStatus> iconStatuses = [];
+  final List<String> tooltips = [];
 
   @override
   Stream<TrayMenuAction> get menuActions => _menuActions.stream;
@@ -803,6 +816,7 @@ final class _FakeTrayAdapter implements TrayAdapter {
   Future<void> initialize(
     List<TrayMenuEntry> entries, {
     required TrayIconStatus iconStatus,
+    required String tooltip,
   }) async {
     if (failsOnInitialize) {
       throw StateError('tray unavailable');
@@ -811,7 +825,10 @@ final class _FakeTrayAdapter implements TrayAdapter {
     latestEntries = entries;
     initializedIconStatus = iconStatus;
     latestIconStatus = iconStatus;
+    initializedTooltip = tooltip;
+    latestTooltip = tooltip;
     iconStatuses.add(iconStatus);
+    tooltips.add(tooltip);
   }
 
   @override
@@ -823,6 +840,12 @@ final class _FakeTrayAdapter implements TrayAdapter {
   Future<void> updateIcon(TrayIconStatus iconStatus) async {
     latestIconStatus = iconStatus;
     iconStatuses.add(iconStatus);
+  }
+
+  @override
+  Future<void> updateTooltip(String tooltip) async {
+    latestTooltip = tooltip;
+    tooltips.add(tooltip);
   }
 
   void emitMenuAction(TrayMenuAction action) {

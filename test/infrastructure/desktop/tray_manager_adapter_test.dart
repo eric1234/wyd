@@ -31,7 +31,7 @@ void main() {
           .setMockMethodCallHandler(channel, null);
     });
 
-    test('initialization sets the icon before the context menu', () async {
+    test('initialization sets the icon, tooltip, then context menu', () async {
       const iconAssets = TrayIconAssetSet(
         tracking: TrayIconAsset(path: 'assets/tracking-test.png'),
         idle: TrayIconAsset(path: 'assets/idle-test.png'),
@@ -39,17 +39,24 @@ void main() {
       final adapter = TrayManagerAdapter(
         iconAssets: iconAssets,
         supportsSecondaryClickMenu: false,
+        supportsTooltip: true,
       );
       addTearDown(adapter.dispose);
 
-      await adapter.initialize(_entries, iconStatus: TrayIconStatus.idle);
+      await adapter.initialize(
+        _entries,
+        iconStatus: TrayIconStatus.idle,
+        tooltip: 'No current task',
+      );
 
-      expect(calls.map((call) => call.method).take(2), [
+      expect(calls.map((call) => call.method).take(3), [
         'setIcon',
+        'setToolTip',
         'setContextMenu',
       ]);
       expect(_iconPath(calls.first), endsWith('assets/idle-test.png'));
       expect(_isTemplate(calls.first), isFalse);
+      expect(_toolTip(calls[1]), 'No current task');
     });
 
     test('idle uses the red PNG icon for Linux-style assets', () async {
@@ -84,9 +91,14 @@ void main() {
       final adapter = TrayManagerAdapter(
         iconAssets: TrayIconAssetSet.linux,
         supportsSecondaryClickMenu: false,
+        supportsTooltip: false,
       );
       addTearDown(adapter.dispose);
-      await adapter.initialize(_entries, iconStatus: TrayIconStatus.tracking);
+      await adapter.initialize(
+        _entries,
+        iconStatus: TrayIconStatus.tracking,
+        tooltip: 'Write docs',
+      );
       calls.clear();
 
       await adapter.updateIcon(TrayIconStatus.idle);
@@ -102,15 +114,78 @@ void main() {
       final adapter = TrayManagerAdapter(
         iconAssets: TrayIconAssetSet.linux,
         supportsSecondaryClickMenu: false,
+        supportsTooltip: false,
       );
       addTearDown(adapter.dispose);
-      await adapter.initialize(_entries, iconStatus: TrayIconStatus.idle);
+      await adapter.initialize(
+        _entries,
+        iconStatus: TrayIconStatus.idle,
+        tooltip: 'No current task',
+      );
       calls.clear();
 
       await adapter.updateIcon(TrayIconStatus.idle);
       await adapter.updateIcon(TrayIconStatus.idle);
 
       expect(_setIconCalls(calls), isEmpty);
+    });
+
+    test('unsupported tooltips do not call setToolTip', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+        supportsTooltip: false,
+      );
+      addTearDown(adapter.dispose);
+
+      await adapter.initialize(
+        _entries,
+        iconStatus: TrayIconStatus.idle,
+        tooltip: 'No current task',
+      );
+      await adapter.updateTooltip('Write docs');
+
+      expect(calls.map((call) => call.method), isNot(contains('setToolTip')));
+    });
+
+    test('repeated same-tooltip updates do not reset the tooltip', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+        supportsTooltip: true,
+      );
+      addTearDown(adapter.dispose);
+      await adapter.initialize(
+        _entries,
+        iconStatus: TrayIconStatus.idle,
+        tooltip: 'No current task',
+      );
+      calls.clear();
+
+      await adapter.updateTooltip('No current task');
+      await adapter.updateTooltip('No current task');
+
+      expect(_setToolTipCalls(calls), isEmpty);
+    });
+
+    test('changed tooltip calls setToolTip with toolTip', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+        supportsTooltip: true,
+      );
+      addTearDown(adapter.dispose);
+      await adapter.initialize(
+        _entries,
+        iconStatus: TrayIconStatus.idle,
+        tooltip: 'No current task',
+      );
+      calls.clear();
+
+      await adapter.updateTooltip('Write docs');
+
+      final tooltipCall = _setToolTipCalls(calls).single;
+      expect(_toolTip(tooltipCall), 'Write docs');
     });
 
     test('macOS-style assets pass per-state template flags', () async {
@@ -209,12 +284,20 @@ List<MethodCall> _setIconCalls(List<MethodCall> calls) {
   return calls.where((call) => call.method == 'setIcon').toList();
 }
 
+List<MethodCall> _setToolTipCalls(List<MethodCall> calls) {
+  return calls.where((call) => call.method == 'setToolTip').toList();
+}
+
 String _iconPath(MethodCall call) {
   return _arguments(call)['iconPath'] as String;
 }
 
 bool _isTemplate(MethodCall call) {
   return _arguments(call)['isTemplate'] as bool;
+}
+
+String _toolTip(MethodCall call) {
+  return _arguments(call)['toolTip'] as String;
 }
 
 Map<dynamic, dynamic> _arguments(MethodCall call) {

@@ -10,13 +10,17 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
     TrayIconAssetSet? iconAssets,
     tray.TrayManager? trayManager,
     bool? supportsSecondaryClickMenu,
+    bool? supportsTooltip,
   }) : iconAssets = iconAssets ?? TrayIconAssetSet.forCurrentPlatform(),
        supportsSecondaryClickMenu =
            supportsSecondaryClickMenu ?? Platform.isMacOS,
+       supportsTooltip =
+           supportsTooltip ?? (Platform.isMacOS || Platform.isWindows),
        _trayManager = trayManager ?? tray.trayManager;
 
   final TrayIconAssetSet iconAssets;
   final bool supportsSecondaryClickMenu;
+  final bool supportsTooltip;
   final tray.TrayManager _trayManager;
   final StreamController<TrayMenuAction> _menuActions =
       StreamController<TrayMenuAction>.broadcast();
@@ -24,6 +28,7 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
       StreamController<void>.broadcast();
 
   TrayIconStatus? _lastIconStatus;
+  String? _lastTooltip;
 
   @override
   Stream<TrayMenuAction> get menuActions => _menuActions.stream;
@@ -35,9 +40,11 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
   Future<void> initialize(
     List<TrayMenuEntry> entries, {
     required TrayIconStatus iconStatus,
+    required String tooltip,
   }) async {
     _trayManager.addListener(this);
     await updateIcon(iconStatus);
+    await updateTooltip(tooltip);
     await updateMenu(entries);
   }
 
@@ -57,6 +64,16 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
     final icon = iconAssets.assetFor(iconStatus);
     await _trayManager.setIcon(icon.path, isTemplate: icon.isTemplate);
     _lastIconStatus = iconStatus;
+  }
+
+  @override
+  Future<void> updateTooltip(String tooltip) async {
+    if (!supportsTooltip || _lastTooltip == tooltip) {
+      return;
+    }
+
+    await _trayManager.setToolTip(tooltip);
+    _lastTooltip = tooltip;
   }
 
   @override

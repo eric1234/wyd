@@ -91,6 +91,7 @@ final class WydAppController extends ChangeNotifier {
       await _trayAdapter.initialize(
         TrayMenuPresenter.build(snapshot),
         iconStatus: TrayMenuPresenter.buildIconStatus(snapshot),
+        tooltip: TrayMenuPresenter.buildTooltip(snapshot),
       );
       await _singleInstanceAdapter?.initialize(openQuickEntry);
       await _nativeLifecycleAdapter?.initialize(exitRequested);
@@ -347,6 +348,7 @@ final class WydAppController extends ChangeNotifier {
 
   Future<void> _refreshTray(AppStateSnapshot snapshot) async {
     await _trayAdapter.updateIcon(TrayMenuPresenter.buildIconStatus(snapshot));
+    await _trayAdapter.updateTooltip(TrayMenuPresenter.buildTooltip(snapshot));
     await _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
   }
 

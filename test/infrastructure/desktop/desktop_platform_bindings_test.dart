@@ -4,18 +4,19 @@ import 'package:wyd/src/infrastructure/desktop/desktop.dart';
 
 void main() {
   group('DesktopPlatformBindings', () {
-    test('uses XDG-compatible start-at-login on Linux', () {
-      final startupAtLogin = _FakeStartupAtLoginAdapter();
+    test('uses package-backed start-at-login on Linux', () {
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: true,
         isMacOS: false,
-        linuxStartupAtLoginFactory: () => startupAtLogin,
       );
 
       expect(bindings.capabilities.supportsStartAtLogin, isTrue);
       expect(bindings.capabilities.supportsPowerEvents, isFalse);
       expect(bindings.capabilities.supportsTrayClickActions, isFalse);
-      expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
+      expect(
+        bindings.startupAtLoginAdapter,
+        isA<LaunchAtStartupStartupAtLoginAdapter>(),
+      );
       expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
       expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
       expect(
@@ -24,30 +25,55 @@ void main() {
       );
     });
 
-    test('enables macOS tray lifecycle and power bindings', () {
+    test(
+      'enables macOS tray lifecycle, power, and start-at-login bindings',
+      () {
+        final startupAtLogin = _FakeStartupAtLoginAdapter();
+        final bindings = DesktopPlatformBindings.forPlatform(
+          isLinux: false,
+          isMacOS: true,
+          macOSStartupAtLoginFactory: () => startupAtLogin,
+        );
+
+        expect(bindings.capabilities.supportsStartAtLogin, isTrue);
+        expect(bindings.capabilities.supportsPowerEvents, isTrue);
+        expect(bindings.capabilities.supportsUserIdleDetection, isFalse);
+        expect(bindings.capabilities.supportsTrayClickActions, isTrue);
+        expect(bindings.capabilities.supportsTrayRelativePositioning, isFalse);
+        expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
+        expect(
+          bindings.powerEventAdapter,
+          isA<EventChannelPowerEventAdapter>(),
+        );
+        expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
+        expect(
+          bindings.nativeLifecycleAdapter,
+          isA<MethodChannelNativeLifecycleAdapter>(),
+        );
+      },
+    );
+
+    test('exposes best-effort package-backed start-at-login on Windows', () {
+      final startupAtLogin = _FakeStartupAtLoginAdapter();
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: false,
-        isMacOS: true,
+        isMacOS: false,
+        isWindows: true,
+        windowsStartupAtLoginFactory: () => startupAtLogin,
       );
 
-      expect(bindings.capabilities.supportsStartAtLogin, isFalse);
-      expect(bindings.capabilities.supportsPowerEvents, isTrue);
-      expect(bindings.capabilities.supportsUserIdleDetection, isFalse);
-      expect(bindings.capabilities.supportsTrayClickActions, isTrue);
-      expect(bindings.capabilities.supportsTrayRelativePositioning, isFalse);
-      expect(
-        bindings.startupAtLoginAdapter,
-        isA<UnsupportedStartupAtLoginAdapter>(),
-      );
-      expect(bindings.powerEventAdapter, isA<EventChannelPowerEventAdapter>());
-      expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
+      expect(bindings.capabilities.supportsStartAtLogin, isTrue);
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(bindings.capabilities.supportsTrayClickActions, isFalse);
+      expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
+      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
       expect(
         bindings.nativeLifecycleAdapter,
-        isA<MethodChannelNativeLifecycleAdapter>(),
+        isA<UnsupportedNativeLifecycleAdapter>(),
       );
     });
 
-    test('does not expose Linux start-at-login on other platforms', () {
+    test('does not expose start-at-login on unsupported platforms', () {
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: false,
         isMacOS: false,
@@ -72,6 +98,7 @@ void main() {
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: true,
         isMacOS: false,
+        linuxStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
         supportsUserIdleDetection: true,
         userIdleDetector: userIdleDetector,
       );

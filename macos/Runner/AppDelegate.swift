@@ -1,11 +1,13 @@
 import Cocoa
 import FlutterMacOS
+import ServiceManagement
 
 @main
 class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   private var singleInstanceChannel: FlutterMethodChannel?
   private var lifecycleChannel: FlutterMethodChannel?
   private var powerEventChannel: FlutterEventChannel?
+  private var launchAtStartupChannels: [FlutterMethodChannel] = []
   private var pendingExistingInstanceActivation = false
   private var singleInstanceReady = false
   private var lifecycleReady = false
@@ -21,6 +23,87 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     configureSingleInstanceChannel(binaryMessenger: binaryMessenger)
     configureLifecycleChannel(binaryMessenger: binaryMessenger)
     configurePowerEventChannel(binaryMessenger: binaryMessenger)
+    configureLaunchAtStartupChannel(for: controller)
+  }
+
+  func configureLaunchAtStartupChannel(for controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "launch_at_startup",
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "launchAtStartupIsEnabled":
+        result(self?.isLaunchAtStartupEnabled() ?? false)
+      case "launchAtStartupSetEnabled":
+        guard let arguments = call.arguments as? [String: Any],
+              let enabled = arguments["setEnabledValue"] as? Bool else {
+          result(
+            FlutterError(
+              code: "invalid_arguments",
+              message: "launchAtStartupSetEnabled requires setEnabledValue.",
+              details: nil
+            )
+          )
+          return
+        }
+        guard let self else {
+          result(
+            FlutterError(
+              code: "app_delegate_unavailable",
+              message: "App delegate is unavailable.",
+              details: nil
+            )
+          )
+          return
+        }
+        self.setLaunchAtStartupEnabled(enabled, result: result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    launchAtStartupChannels.append(channel)
+  }
+
+  private func isLaunchAtStartupEnabled() -> Bool {
+    guard #available(macOS 13.0, *) else {
+      return false
+    }
+
+    return SMAppService.mainApp.status == .enabled
+  }
+
+  private func setLaunchAtStartupEnabled(_ enabled: Bool, result: FlutterResult) {
+    guard #available(macOS 13.0, *) else {
+      result(
+        FlutterError(
+          code: "unsupported_macos_version",
+          message: "Launch at login requires macOS 13 or later.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    let service = SMAppService.mainApp
+    do {
+      if enabled {
+        if service.status != .enabled {
+          try service.register()
+        }
+      } else if service.status == .enabled || service.status == .requiresApproval {
+        try service.unregister()
+      }
+      result(nil)
+    } catch {
+      result(
+        FlutterError(
+          code: "launch_at_login_update_failed",
+          message: error.localizedDescription,
+          details: nil
+        )
+      )
+    }
   }
 
   override func applicationDidFinishLaunching(_ notification: Notification) {

@@ -185,6 +185,37 @@ void main() {
     expect(client.submittedTexts, ['Fix bug']);
   });
 
+  testWidgets('Escape clears highlighted suggestion before Enter submit', (
+    tester,
+  ) async {
+    final client = _FakeQuickEntryClient(
+      suggestions: [_suggestion('SPHY-494 - PR Review')],
+    );
+    final controller = QuickEntryController(
+      client: client,
+      onSubmitted: (_) async {},
+    );
+    await controller.open(_snapshot(activeTask: null));
+
+    await tester.pumpWidget(
+      MaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.enterText(find.byType(TextField), 'PR Review');
+    await tester.pump();
+
+    expect(controller.state.highlightedIndex, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(controller.state.highlightedIndex, isNull);
+
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    expect(client.submittedTexts, ['PR Review']);
+  });
+
   testWidgets('tapping a suggestion submits it immediately', (tester) async {
     final client = _FakeQuickEntryClient(suggestions: [_suggestion('Fix bug')]);
     final controller = QuickEntryController(

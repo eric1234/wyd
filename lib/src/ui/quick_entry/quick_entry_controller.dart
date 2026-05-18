@@ -92,6 +92,7 @@ final class QuickEntryController extends ChangeNotifier {
 
   QuickEntryState _state = const QuickEntryState();
   int _suggestionRequest = 0;
+  bool _suppressAutocompleteHighlight = false;
 
   QuickEntryState get state => _state;
 
@@ -105,6 +106,7 @@ final class QuickEntryController extends ChangeNotifier {
     final initialText = activeTask?.taskText ?? '';
     final initialSuggestions = snapshot.recentSuggestions;
     final shouldHighlightFirstSuggestion = initialText.isEmpty;
+    _suppressAutocompleteHighlight = false;
     _setState(
       QuickEntryState(
         isOpen: true,
@@ -124,6 +126,7 @@ final class QuickEntryController extends ChangeNotifier {
 
   void close() {
     _suggestionRequest += 1;
+    _suppressAutocompleteHighlight = false;
     _setState(
       _state.copyWith(
         isOpen: false,
@@ -135,6 +138,10 @@ final class QuickEntryController extends ChangeNotifier {
   }
 
   Future<void> updateText(String text) async {
+    if (text.isEmpty) {
+      _suppressAutocompleteHighlight = false;
+    }
+
     _setState(
       _state.copyWith(
         text: text,
@@ -170,7 +177,9 @@ final class QuickEntryController extends ChangeNotifier {
     }
 
     final shouldHighlightFirstSuggestion =
-        suggestions.isNotEmpty && !showRecentTasks;
+        suggestions.isNotEmpty &&
+        !showRecentTasks &&
+        !_suppressAutocompleteHighlight;
 
     _setState(
       _state.copyWith(
@@ -182,6 +191,7 @@ final class QuickEntryController extends ChangeNotifier {
   }
 
   void moveHighlight(int delta) {
+    _suppressAutocompleteHighlight = false;
     final suggestions = _state.suggestions;
     if (suggestions.isEmpty) {
       _setState(_state.copyWith(clearHighlightedIndex: true));
@@ -211,6 +221,7 @@ final class QuickEntryController extends ChangeNotifier {
       return;
     }
 
+    _suppressAutocompleteHighlight = false;
     _setState(
       _state.copyWith(
         text: _state.suggestions[index].taskText,
@@ -222,6 +233,15 @@ final class QuickEntryController extends ChangeNotifier {
     if (submitNow) {
       await submit();
     }
+  }
+
+  void cancelAutocompleteSelection() {
+    if (!_state.isOpen) {
+      return;
+    }
+
+    _suppressAutocompleteHighlight = true;
+    _setState(_state.copyWith(clearHighlightedIndex: true));
   }
 
   Future<void> submit() async {

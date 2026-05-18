@@ -173,6 +173,68 @@ void main() {
       expect(client.submittedTexts, ['Write docs']);
     });
 
+    test('cancels highlighted autocomplete and submits exact text', () async {
+      final client = _FakeQuickEntryClient(
+        suggestionsByQuery: {
+          'PR Review': [_suggestion('SPHY-494 - PR Review')],
+        },
+      );
+      final controller = _controller(client);
+      await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+      await controller.updateText('PR Review');
+
+      expect(controller.state.highlightedIndex, 0);
+
+      controller.cancelAutocompleteSelection();
+
+      expect(controller.state.text, 'PR Review');
+      expect(
+        controller.state.suggestions.single.taskText,
+        'SPHY-494 - PR Review',
+      );
+      expect(controller.state.highlightedIndex, isNull);
+
+      await controller.submit();
+
+      expect(client.submittedTexts, ['PR Review']);
+    });
+
+    test(
+      'cancelled autocomplete stays unhighlighted until selection',
+      () async {
+        final suggestions = [
+          _suggestion('SPHY-494 - PR Review'),
+          _suggestion('PR review follow-up'),
+        ];
+        final client = _FakeQuickEntryClient(
+          suggestionsByQuery: {
+            'pr': suggestions,
+            'pr ': suggestions,
+            '': suggestions,
+          },
+        );
+        final controller = _controller(client);
+        await controller.open(_snapshot(activeTask: _activeTask('Existing')));
+        await controller.updateText('pr');
+
+        expect(controller.state.highlightedIndex, 0);
+
+        controller.cancelAutocompleteSelection();
+        await controller.updateText('pr ');
+
+        expect(controller.state.highlightedIndex, isNull);
+
+        controller.moveHighlight(1);
+
+        expect(controller.state.highlightedIndex, 0);
+
+        controller.cancelAutocompleteSelection();
+        await controller.updateText('');
+
+        expect(controller.state.highlightedIndex, 0);
+      },
+    );
+
     test('exact-only filtered match falls back to recent tasks', () async {
       final client = _FakeQuickEntryClient(
         suggestionsByQuery: {

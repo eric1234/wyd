@@ -85,6 +85,8 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.arrowDown): _MoveSuggestionIntent(1),
         SingleActivator(LogicalKeyboardKey.arrowUp): _MoveSuggestionIntent(-1),
+        SingleActivator(LogicalKeyboardKey.escape):
+            _CancelAutocompleteSelectionIntent(),
       },
       child: Actions(
         actions: {
@@ -94,6 +96,13 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
               return null;
             },
           ),
+          _CancelAutocompleteSelectionIntent:
+              CallbackAction<_CancelAutocompleteSelectionIntent>(
+                onInvoke: (intent) {
+                  widget.controller.cancelAutocompleteSelection();
+                  return null;
+                },
+              ),
         },
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -231,4 +240,8 @@ final class _MoveSuggestionIntent extends Intent {
   const _MoveSuggestionIntent(this.delta);
 
   final int delta;
+}
+
+final class _CancelAutocompleteSelectionIntent extends Intent {
+  const _CancelAutocompleteSelectionIntent();
 }

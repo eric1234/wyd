@@ -1,5 +1,7 @@
 enum TrayMenuAction { updateTask, stopTask, report, settings, exit }
 
+enum TrayIconStatus { tracking, idle }
+
 final class TrayMenuEntry {
   const TrayMenuEntry({
     required this.action,
@@ -17,9 +19,14 @@ abstract interface class TrayAdapter {
 
   Stream<void> get primaryClicks;
 
-  Future<void> initialize(List<TrayMenuEntry> entries);
+  Future<void> initialize(
+    List<TrayMenuEntry> entries, {
+    required TrayIconStatus iconStatus,
+  });
 
   Future<void> updateMenu(List<TrayMenuEntry> entries);
+
+  Future<void> updateIcon(TrayIconStatus iconStatus);
 
   Future<void> dispose();
 }

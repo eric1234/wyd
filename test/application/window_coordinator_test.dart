@@ -7,19 +7,19 @@ import 'package:wyd/src/domain/domain.dart';
 void main() {
   group('TrayMenuPresenter', () {
     test('disables stop task when idle', () {
-      final menu = TrayMenuPresenter.build(
-        AppStateSnapshot(
-          activeTask: null,
-          runtimeState: RuntimeState(),
-          settings: AppSettings.defaults,
-        ),
+      final snapshot = AppStateSnapshot(
+        activeTask: null,
+        runtimeState: RuntimeState(),
+        settings: AppSettings.defaults,
       );
+      final menu = TrayMenuPresenter.build(snapshot);
 
       final stopTask = menu.singleWhere(
         (entry) => entry.action == TrayMenuAction.stopTask,
       );
 
       expect(stopTask.enabled, isFalse);
+      expect(TrayMenuPresenter.buildIconStatus(snapshot), TrayIconStatus.idle);
       expect(menu.map((entry) => entry.label), [
         'Update Task',
         'Stop Task',
@@ -30,24 +30,27 @@ void main() {
     });
 
     test('enables stop task while tracking', () {
-      final menu = TrayMenuPresenter.build(
-        AppStateSnapshot(
-          activeTask: ActiveTask(
-            taskText: 'Write docs',
-            taskTextNormalized: 'write docs',
-            startedAtUtc: DateTime.utc(2026, 1, 1, 9),
-            sourceEventId: 1,
-          ),
-          runtimeState: RuntimeState(),
-          settings: AppSettings.defaults,
+      final snapshot = AppStateSnapshot(
+        activeTask: ActiveTask(
+          taskText: 'Write docs',
+          taskTextNormalized: 'write docs',
+          startedAtUtc: DateTime.utc(2026, 1, 1, 9),
+          sourceEventId: 1,
         ),
+        runtimeState: RuntimeState(),
+        settings: AppSettings.defaults,
       );
+      final menu = TrayMenuPresenter.build(snapshot);
 
       final stopTask = menu.singleWhere(
         (entry) => entry.action == TrayMenuAction.stopTask,
       );
 
       expect(stopTask.enabled, isTrue);
+      expect(
+        TrayMenuPresenter.buildIconStatus(snapshot),
+        TrayIconStatus.tracking,
+      );
     });
   });
 

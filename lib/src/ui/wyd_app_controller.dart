@@ -87,7 +87,11 @@ final class WydAppController extends ChangeNotifier {
     try {
       await _hideResidentWindow?.call();
       _snapshot = await _trackerService.recoverOnStartup();
-      await _trayAdapter.initialize(TrayMenuPresenter.build(_snapshot!));
+      final snapshot = _snapshot!;
+      await _trayAdapter.initialize(
+        TrayMenuPresenter.build(snapshot),
+        iconStatus: TrayMenuPresenter.buildIconStatus(snapshot),
+      );
       await _singleInstanceAdapter?.initialize(openQuickEntry);
       await _nativeLifecycleAdapter?.initialize(exitRequested);
       _menuSubscription = _trayAdapter.menuActions.listen(_handleTrayAction);
@@ -157,7 +161,7 @@ final class WydAppController extends ChangeNotifier {
       rethrow;
     }
 
-    await _refreshTrayMenu(latestSnapshot);
+    await _refreshTray(latestSnapshot);
     _nagScheduler?.update(latestSnapshot);
     notifyListeners();
   }
@@ -183,7 +187,7 @@ final class WydAppController extends ChangeNotifier {
     final beforeSnapshot = await _trackerService.loadSnapshot();
     if (beforeSnapshot.activeTask == null) {
       _snapshot = beforeSnapshot;
-      await _refreshTrayMenu(beforeSnapshot);
+      await _refreshTray(beforeSnapshot);
       _nagScheduler?.update(beforeSnapshot);
       notifyListeners();
       return;
@@ -201,7 +205,7 @@ final class WydAppController extends ChangeNotifier {
     if (shouldCloseQuickEntryWindow) {
       await _windowCoordinator.close(WindowRole.quickEntry);
     }
-    await _refreshTrayMenu(latestSnapshot);
+    await _refreshTray(latestSnapshot);
     _nagScheduler?.update(latestSnapshot);
     notifyListeners();
   }
@@ -209,7 +213,7 @@ final class WydAppController extends ChangeNotifier {
   Future<AppStateSnapshot> nagPromptTimedOut() async {
     final latestSnapshot = await _trackerService.nagPromptTimedOut();
     _snapshot = latestSnapshot;
-    await _refreshTrayMenu(latestSnapshot);
+    await _refreshTray(latestSnapshot);
     notifyListeners();
     return latestSnapshot;
   }
@@ -238,7 +242,7 @@ final class WydAppController extends ChangeNotifier {
   Future<void> exitRequested() async {
     final latestSnapshot = await _trackerService.exitRequested();
     _snapshot = latestSnapshot;
-    await _refreshTrayMenu(latestSnapshot);
+    await _refreshTray(latestSnapshot);
     _nagScheduler?.update(latestSnapshot);
     quickEntry.close();
     _activeRole = null;
@@ -302,14 +306,14 @@ final class WydAppController extends ChangeNotifier {
     _snapshot = snapshot;
     _activeRole = null;
     await _windowCoordinator.close(WindowRole.quickEntry);
-    await _refreshTrayMenu(snapshot);
+    await _refreshTray(snapshot);
     _nagScheduler?.update(snapshot);
     notifyListeners();
   }
 
   Future<void> settingsSaved(AppStateSnapshot snapshot) async {
     _snapshot = snapshot;
-    await _refreshTrayMenu(snapshot);
+    await _refreshTray(snapshot);
     _nagScheduler?.update(snapshot);
     notifyListeners();
   }
@@ -317,7 +321,7 @@ final class WydAppController extends ChangeNotifier {
   Future<void> refreshFromExternalChange() async {
     final snapshot = await _trackerService.loadSnapshot();
     _snapshot = snapshot;
-    await _refreshTrayMenu(snapshot);
+    await _refreshTray(snapshot);
     _nagScheduler?.update(snapshot);
     notifyListeners();
   }
@@ -341,8 +345,9 @@ final class WydAppController extends ChangeNotifier {
     );
   }
 
-  Future<void> _refreshTrayMenu(AppStateSnapshot snapshot) {
-    return _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
+  Future<void> _refreshTray(AppStateSnapshot snapshot) async {
+    await _trayAdapter.updateIcon(TrayMenuPresenter.buildIconStatus(snapshot));
+    await _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
   }
 
   void _scheduleSecondaryWindowWarmUp() {

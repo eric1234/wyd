@@ -16,6 +16,8 @@ void main() {
       await harness.controller.initialize();
 
       expect(harness.tray.initialized, isTrue);
+      expect(harness.tray.initializedIconStatus, TrayIconStatus.idle);
+      expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
       expect(harness.tray.latestEntries.last.action, TrayMenuAction.exit);
       expect(
         harness.tray.latestEntries
@@ -85,6 +87,7 @@ void main() {
             .enabled,
         isTrue,
       );
+      expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
     });
 
     test('second-instance activation reopens quick entry', () async {
@@ -181,6 +184,7 @@ void main() {
       expect(harness.controller.quickEntry.state.isOpen, isTrue);
       expect(harness.controller.quickEntry.state.text, isEmpty);
       expect(harness.controller.snapshot!.activeTask, isNull);
+      expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
       expect(
         harness.controller.snapshot!.runtimeState.promptState.status,
         PromptStatus.none,
@@ -219,6 +223,7 @@ void main() {
         expect(harness.window.closedRoles, isEmpty);
         expect(harness.window.openedRoles, isEmpty);
         expect(harness.window.focusedRoles, [WindowRole.quickEntry]);
+        expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
       },
     );
 
@@ -266,6 +271,8 @@ void main() {
           harness.controller.snapshot!.runtimeState.promptState.status,
           PromptStatus.visible,
         );
+        expect(harness.tray.initializedIconStatus, TrayIconStatus.tracking);
+        expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
         expect(
           harness.timers.activeTimers.single.duration,
           const Duration(minutes: 1),
@@ -473,6 +480,7 @@ void main() {
             .enabled,
         isFalse,
       );
+      expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
       expect(harness.timers.activeTimers, isEmpty);
     });
 
@@ -489,8 +497,38 @@ void main() {
 
       final events = await harness.activityLog.allEvents();
       expect(events.last.source, ActivitySource.systemSleep);
+      expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
       expect(harness.controller.quickEntry.state.isOpen, isFalse);
       expect(harness.window.closedRoles, contains(WindowRole.quickEntry));
+    });
+
+    test('external refresh applies latest icon status', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+
+      await harness.activityLog.append(
+        ActivityLogEvent.startTask(
+          occurredAtUtc: harness.clock.current,
+          taskText: 'Write docs',
+        ),
+      );
+      await harness.controller.refreshFromExternalChange();
+
+      expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
+
+      harness.clock.current = harness.clock.current.add(
+        const Duration(minutes: 5),
+      );
+      await harness.activityLog.append(
+        ActivityLogEvent.stopTask(
+          occurredAtUtc: harness.clock.current,
+          source: ActivitySource.manualStop,
+        ),
+      );
+      await harness.controller.refreshFromExternalChange();
+
+      expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
     });
 
     test('power event while idle does not append a stop event', () async {
@@ -751,6 +789,9 @@ final class _FakeTrayAdapter implements TrayAdapter {
       StreamController<void>.broadcast();
   bool initialized = false;
   List<TrayMenuEntry> latestEntries = const [];
+  TrayIconStatus? initializedIconStatus;
+  TrayIconStatus? latestIconStatus;
+  final List<TrayIconStatus> iconStatuses = [];
 
   @override
   Stream<TrayMenuAction> get menuActions => _menuActions.stream;
@@ -759,17 +800,29 @@ final class _FakeTrayAdapter implements TrayAdapter {
   Stream<void> get primaryClicks => _primaryClicks.stream;
 
   @override
-  Future<void> initialize(List<TrayMenuEntry> entries) async {
+  Future<void> initialize(
+    List<TrayMenuEntry> entries, {
+    required TrayIconStatus iconStatus,
+  }) async {
     if (failsOnInitialize) {
       throw StateError('tray unavailable');
     }
     initialized = true;
     latestEntries = entries;
+    initializedIconStatus = iconStatus;
+    latestIconStatus = iconStatus;
+    iconStatuses.add(iconStatus);
   }
 
   @override
   Future<void> updateMenu(List<TrayMenuEntry> entries) async {
     latestEntries = entries;
+  }
+
+  @override
+  Future<void> updateIcon(TrayIconStatus iconStatus) async {
+    latestIconStatus = iconStatus;
+    iconStatuses.add(iconStatus);
   }
 
   void emitMenuAction(TrayMenuAction action) {

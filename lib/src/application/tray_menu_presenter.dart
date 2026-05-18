@@ -20,4 +20,8 @@ final class TrayMenuPresenter {
       const TrayMenuEntry(action: TrayMenuAction.exit, label: 'Exit'),
     ];
   }
+
+  static TrayIconStatus buildIconStatus(AppStateSnapshot snapshot) {
+    return snapshot.isTracking ? TrayIconStatus.tracking : TrayIconStatus.idle;
+  }
 }

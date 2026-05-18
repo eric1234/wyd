@@ -1,6 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/infrastructure/desktop/desktop.dart';
+
+const _entries = [
+  TrayMenuEntry(action: TrayMenuAction.updateTask, label: 'Update Task'),
+];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -10,6 +16,7 @@ void main() {
     late List<MethodCall> calls;
 
     setUp(() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       calls = [];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (call) async {
@@ -19,8 +26,130 @@ void main() {
     });
 
     tearDown(() {
+      debugDefaultTargetPlatformOverride = null;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null);
+    });
+
+    test('initialization sets the icon before the context menu', () async {
+      const iconAssets = TrayIconAssetSet(
+        tracking: TrayIconAsset(path: 'assets/tracking-test.png'),
+        idle: TrayIconAsset(path: 'assets/idle-test.png'),
+      );
+      final adapter = TrayManagerAdapter(
+        iconAssets: iconAssets,
+        supportsSecondaryClickMenu: false,
+      );
+      addTearDown(adapter.dispose);
+
+      await adapter.initialize(_entries, iconStatus: TrayIconStatus.idle);
+
+      expect(calls.map((call) => call.method).take(2), [
+        'setIcon',
+        'setContextMenu',
+      ]);
+      expect(_iconPath(calls.first), endsWith('assets/idle-test.png'));
+      expect(_isTemplate(calls.first), isFalse);
+    });
+
+    test('idle uses the red PNG icon for Linux-style assets', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+      );
+      addTearDown(adapter.dispose);
+
+      await adapter.updateIcon(TrayIconStatus.idle);
+
+      final iconCall = _setIconCalls(calls).single;
+      expect(_iconPath(iconCall), endsWith('assets/tray_icon_idle.png'));
+      expect(_isTemplate(iconCall), isFalse);
+    });
+
+    test('tracking uses the normal PNG icon for Linux-style assets', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+      );
+      addTearDown(adapter.dispose);
+
+      await adapter.updateIcon(TrayIconStatus.tracking);
+
+      final iconCall = _setIconCalls(calls).single;
+      expect(_iconPath(iconCall), endsWith('assets/tray_icon.png'));
+      expect(_isTemplate(iconCall), isFalse);
+    });
+
+    test('tracking-to-idle and idle-to-tracking update the icon', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+      );
+      addTearDown(adapter.dispose);
+      await adapter.initialize(_entries, iconStatus: TrayIconStatus.tracking);
+      calls.clear();
+
+      await adapter.updateIcon(TrayIconStatus.idle);
+      await adapter.updateIcon(TrayIconStatus.tracking);
+
+      final iconCalls = _setIconCalls(calls);
+      expect(iconCalls, hasLength(2));
+      expect(_iconPath(iconCalls[0]), endsWith('assets/tray_icon_idle.png'));
+      expect(_iconPath(iconCalls[1]), endsWith('assets/tray_icon.png'));
+    });
+
+    test('repeated same-state updates do not reset the icon', () async {
+      final adapter = TrayManagerAdapter(
+        iconAssets: TrayIconAssetSet.linux,
+        supportsSecondaryClickMenu: false,
+      );
+      addTearDown(adapter.dispose);
+      await adapter.initialize(_entries, iconStatus: TrayIconStatus.idle);
+      calls.clear();
+
+      await adapter.updateIcon(TrayIconStatus.idle);
+      await adapter.updateIcon(TrayIconStatus.idle);
+
+      expect(_setIconCalls(calls), isEmpty);
+    });
+
+    test('macOS-style assets pass per-state template flags', () async {
+      const iconAssets = TrayIconAssetSet(
+        tracking: TrayIconAsset(
+          path: 'assets/tracking-template-test.png',
+          isTemplate: true,
+        ),
+        idle: TrayIconAsset(path: 'assets/idle-test.png'),
+      );
+      final adapter = TrayManagerAdapter(
+        iconAssets: iconAssets,
+        supportsSecondaryClickMenu: true,
+      );
+      addTearDown(adapter.dispose);
+
+      await adapter.updateIcon(TrayIconStatus.tracking);
+      await adapter.updateIcon(TrayIconStatus.idle);
+
+      final iconCalls = _setIconCalls(calls);
+      expect(iconCalls, hasLength(2));
+      expect(
+        _iconPath(iconCalls[0]),
+        endsWith('assets/tracking-template-test.png'),
+      );
+      expect(_isTemplate(iconCalls[0]), isTrue);
+      expect(_iconPath(iconCalls[1]), endsWith('assets/idle-test.png'));
+      expect(_isTemplate(iconCalls[1]), isFalse);
+    });
+
+    test('Windows fallback assets include an idle ICO', () {
+      expect(
+        TrayIconAssetSet.windows.assetFor(TrayIconStatus.tracking).path,
+        'assets/tray_icon.ico',
+      );
+      expect(
+        TrayIconAssetSet.windows.assetFor(TrayIconStatus.idle).path,
+        'assets/tray_icon_idle.ico',
+      );
     });
 
     test(
@@ -74,4 +203,20 @@ void main() {
       expect(calls, isEmpty);
     });
   });
+}
+
+List<MethodCall> _setIconCalls(List<MethodCall> calls) {
+  return calls.where((call) => call.method == 'setIcon').toList();
+}
+
+String _iconPath(MethodCall call) {
+  return _arguments(call)['iconPath'] as String;
+}
+
+bool _isTemplate(MethodCall call) {
+  return _arguments(call)['isTemplate'] as bool;
+}
+
+Map<dynamic, dynamic> _arguments(MethodCall call) {
+  return call.arguments as Map<dynamic, dynamic>;
 }

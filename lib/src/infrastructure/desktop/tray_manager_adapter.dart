@@ -7,31 +7,23 @@ import '../../application/application.dart';
 
 final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
   TrayManagerAdapter({
-    String? iconPath,
+    TrayIconAssetSet? iconAssets,
     tray.TrayManager? trayManager,
     bool? supportsSecondaryClickMenu,
-  }) : iconPath = iconPath ?? _defaultIconPath,
+  }) : iconAssets = iconAssets ?? TrayIconAssetSet.forCurrentPlatform(),
        supportsSecondaryClickMenu =
            supportsSecondaryClickMenu ?? Platform.isMacOS,
        _trayManager = trayManager ?? tray.trayManager;
 
-  static String get _defaultIconPath {
-    if (Platform.isMacOS) {
-      return 'assets/tray_icon_template.png';
-    }
-    if (Platform.isWindows) {
-      return 'assets/tray_icon.ico';
-    }
-    return 'assets/tray_icon.png';
-  }
-
-  final String iconPath;
+  final TrayIconAssetSet iconAssets;
   final bool supportsSecondaryClickMenu;
   final tray.TrayManager _trayManager;
   final StreamController<TrayMenuAction> _menuActions =
       StreamController<TrayMenuAction>.broadcast();
   final StreamController<void> _primaryClicks =
       StreamController<void>.broadcast();
+
+  TrayIconStatus? _lastIconStatus;
 
   @override
   Stream<TrayMenuAction> get menuActions => _menuActions.stream;
@@ -40,9 +32,12 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
   Stream<void> get primaryClicks => _primaryClicks.stream;
 
   @override
-  Future<void> initialize(List<TrayMenuEntry> entries) async {
+  Future<void> initialize(
+    List<TrayMenuEntry> entries, {
+    required TrayIconStatus iconStatus,
+  }) async {
     _trayManager.addListener(this);
-    await _trayManager.setIcon(iconPath, isTemplate: Platform.isMacOS);
+    await updateIcon(iconStatus);
     await updateMenu(entries);
   }
 
@@ -51,6 +46,17 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
     await _trayManager.setContextMenu(
       tray.Menu(items: entries.map(_toMenuItem).toList(growable: false)),
     );
+  }
+
+  @override
+  Future<void> updateIcon(TrayIconStatus iconStatus) async {
+    if (_lastIconStatus == iconStatus) {
+      return;
+    }
+
+    final icon = iconAssets.assetFor(iconStatus);
+    await _trayManager.setIcon(icon.path, isTemplate: icon.isTemplate);
+    _lastIconStatus = iconStatus;
   }
 
   @override
@@ -108,4 +114,53 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
 
     return null;
   }
+}
+
+final class TrayIconAssetSet {
+  const TrayIconAssetSet({required this.tracking, required this.idle});
+
+  static const linux = TrayIconAssetSet(
+    tracking: TrayIconAsset(path: 'assets/tray_icon.png'),
+    idle: TrayIconAsset(path: 'assets/tray_icon_idle.png'),
+  );
+
+  static const macOS = TrayIconAssetSet(
+    tracking: TrayIconAsset(
+      path: 'assets/tray_icon_template.png',
+      isTemplate: true,
+    ),
+    idle: TrayIconAsset(path: 'assets/tray_icon_idle.png'),
+  );
+
+  static const windows = TrayIconAssetSet(
+    tracking: TrayIconAsset(path: 'assets/tray_icon.ico'),
+    idle: TrayIconAsset(path: 'assets/tray_icon_idle.ico'),
+  );
+
+  static TrayIconAssetSet forCurrentPlatform() {
+    if (Platform.isMacOS) {
+      return macOS;
+    }
+    if (Platform.isWindows) {
+      return windows;
+    }
+    return linux;
+  }
+
+  final TrayIconAsset tracking;
+  final TrayIconAsset idle;
+
+  TrayIconAsset assetFor(TrayIconStatus status) {
+    return switch (status) {
+      TrayIconStatus.tracking => tracking,
+      TrayIconStatus.idle => idle,
+    };
+  }
+}
+
+final class TrayIconAsset {
+  const TrayIconAsset({required this.path, this.isTemplate = false});
+
+  final String path;
+  final bool isTemplate;
 }

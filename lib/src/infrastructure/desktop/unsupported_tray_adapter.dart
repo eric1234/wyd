@@ -20,12 +20,18 @@ final class UnsupportedTrayAdapter implements TrayAdapter {
   Stream<void> get primaryClicks => _primaryClicks.stream;
 
   @override
-  Future<void> initialize(List<TrayMenuEntry> entries) {
+  Future<void> initialize(
+    List<TrayMenuEntry> entries, {
+    required TrayIconStatus iconStatus,
+  }) {
     throw UnsupportedError(reason);
   }
 
   @override
   Future<void> updateMenu(List<TrayMenuEntry> entries) async {}
+
+  @override
+  Future<void> updateIcon(TrayIconStatus iconStatus) async {}
 
   @override
   Future<void> dispose() async {

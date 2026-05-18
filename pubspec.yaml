@@ -76,6 +76,8 @@ flutter:
     - assets/app_icon.png
     - assets/tray_icon.png
     - assets/tray_icon.ico
+    - assets/tray_icon_idle.png
+    - assets/tray_icon_idle.ico
     - assets/tray_icon_template.png
 
   # To add assets to your application, add an assets section, like this:

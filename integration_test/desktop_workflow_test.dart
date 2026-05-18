@@ -239,6 +239,7 @@ final class _FakeTrayAdapter implements TrayAdapter {
   final StreamController<void> _primaryClicks =
       StreamController<void>.broadcast();
   List<TrayMenuEntry> latestEntries = const [];
+  TrayIconStatus? latestIconStatus;
 
   @override
   Stream<TrayMenuAction> get menuActions => _menuActions.stream;
@@ -247,13 +248,22 @@ final class _FakeTrayAdapter implements TrayAdapter {
   Stream<void> get primaryClicks => _primaryClicks.stream;
 
   @override
-  Future<void> initialize(List<TrayMenuEntry> entries) async {
+  Future<void> initialize(
+    List<TrayMenuEntry> entries, {
+    required TrayIconStatus iconStatus,
+  }) async {
     latestEntries = entries;
+    latestIconStatus = iconStatus;
   }
 
   @override
   Future<void> updateMenu(List<TrayMenuEntry> entries) async {
     latestEntries = entries;
+  }
+
+  @override
+  Future<void> updateIcon(TrayIconStatus iconStatus) async {
+    latestIconStatus = iconStatus;
   }
 
   void emitMenuAction(TrayMenuAction action) {

@@ -100,8 +100,7 @@ final class WydAppController extends ChangeNotifier {
           unawaited(handleRuntimeError(error, stackTrace));
         },
       );
-      _nagScheduler?.update(_snapshot!);
-      notifyListeners();
+      await _openQuickEntry();
       await _reconcileStartupAtLogin(_snapshot!);
       _scheduleSecondaryWindowWarmUp();
     } catch (error) {

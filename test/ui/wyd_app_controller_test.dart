@@ -34,6 +34,22 @@ void main() {
       expect(harness.hideResidentWindowRequests(), 1);
     });
 
+    test('auto-opens quick entry after startup', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+
+      await harness.controller.initialize();
+
+      expect(harness.tray.initialized, isTrue);
+      expect(harness.controller.activeRole, WindowRole.quickEntry);
+      expect(harness.controller.quickEntry.state.isOpen, isTrue);
+      expect(harness.window.openedRoles, [WindowRole.quickEntry]);
+      expect(
+        harness.controller.snapshot!.runtimeState.promptState.status,
+        PromptStatus.none,
+      );
+    });
+
     test('surfaces startup error when tray initialization fails', () async {
       final harness = await _Harness.create(trayFailsOnInitialize: true);
       addTearDown(harness.dispose);
@@ -71,16 +87,18 @@ void main() {
       );
     });
 
-    test('second-instance activation opens quick entry', () async {
+    test('second-instance activation reopens quick entry', () async {
       final harness = await _Harness.create(withSingleInstance: true);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
+      harness.window.emitCloseRequest(WindowRole.quickEntry);
+      await Future<void>.delayed(Duration.zero);
 
       await harness.singleInstance.activateSecondInstance();
 
       expect(harness.controller.activeRole, WindowRole.quickEntry);
       expect(harness.controller.quickEntry.state.isOpen, isTrue);
-      expect(harness.window.openedRoles, contains(WindowRole.quickEntry));
+      expect(harness.window.openedRoles.last, WindowRole.quickEntry);
     });
 
     test('active-task nag keeps a stable size for suggestions', () async {
@@ -121,7 +139,7 @@ void main() {
         WindowRole.report,
         WindowRole.settings,
       ]);
-      expect(harness.window.openedRoles, isEmpty);
+      expect(harness.window.openedRoles, [WindowRole.quickEntry]);
     });
 
     test('opening a warmed report focuses the preloaded window', () async {
@@ -134,7 +152,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 1));
       await harness.controller.openReport();
 
-      expect(harness.window.openedRoles, isEmpty);
+      expect(harness.window.openedRoles, [WindowRole.quickEntry]);
       expect(harness.window.focusedRoles, [WindowRole.report]);
     });
 
@@ -172,6 +190,34 @@ void main() {
 
         await harness.controller.openQuickEntry();
 
+        expect(
+          harness.controller.snapshot!.runtimeState.promptState.status,
+          PromptStatus.visible,
+        );
+        expect(
+          harness.timers.activeTimers.single.duration,
+          const Duration(minutes: 1),
+        );
+      },
+    );
+
+    test(
+      'startup nag for recovered active task schedules response timeout',
+      () async {
+        final harness = await _Harness.create(withScheduler: true);
+        addTearDown(harness.dispose);
+        await harness.activityLog.append(
+          ActivityLogEvent.startTask(
+            occurredAtUtc: harness.clock.current,
+            taskText: 'Write docs',
+          ),
+        );
+
+        await harness.controller.initialize();
+
+        expect(harness.controller.activeRole, WindowRole.quickEntry);
+        expect(harness.controller.quickEntry.state.isOpen, isTrue);
+        expect(harness.controller.quickEntry.state.text, 'Write docs');
         expect(
           harness.controller.snapshot!.runtimeState.promptState.status,
           PromptStatus.visible,
@@ -434,7 +480,8 @@ void main() {
         harness.controller.runtimeErrorMessage,
         contains('power stream failed'),
       );
-      expect(harness.window.openedConfigurations.last.title, 'wyd error');
+      expect(harness.window.resizedConfigurations.last.title, 'wyd error');
+      expect(harness.window.focusedRoles.last, WindowRole.quickEntry);
     });
   });
 }

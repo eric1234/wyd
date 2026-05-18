@@ -156,16 +156,17 @@ void main() {
       expect(harness.window.focusedRoles, [WindowRole.report]);
     });
 
-    test('routes tray stop action to service and refreshes menu', () async {
-      final harness = await _Harness.create();
+    test('tray stop stops task and opens quick entry reminder', () async {
+      final harness = await _Harness.create(withScheduler: true);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
       await harness.controller.openQuickEntry();
       await harness.controller.quickEntry.updateText('Write docs');
       await harness.controller.quickEntry.submit();
+      harness.window.openedRoles.clear();
 
       harness.tray.emitMenuAction(TrayMenuAction.stopTask);
-      await Future<void>.delayed(Duration.zero);
+      await _waitUntil(() => harness.window.openedRoles.isNotEmpty);
 
       final events = await harness.activityLog.allEvents();
       expect(events.last.eventType, ActivityEventType.stopTask);
@@ -176,7 +177,50 @@ void main() {
             .enabled,
         isFalse,
       );
+      expect(harness.controller.activeRole, WindowRole.quickEntry);
+      expect(harness.controller.quickEntry.state.isOpen, isTrue);
+      expect(harness.controller.quickEntry.state.text, isEmpty);
+      expect(harness.controller.snapshot!.activeTask, isNull);
+      expect(
+        harness.controller.snapshot!.runtimeState.promptState.status,
+        PromptStatus.none,
+      );
+      expect(harness.timers.activeTimers, isEmpty);
+      expect(harness.window.openedRoles, [WindowRole.quickEntry]);
     });
+
+    test(
+      'stop while quick entry is open resets text and keeps window',
+      () async {
+        final harness = await _Harness.create();
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        await harness.controller.openQuickEntry();
+        await harness.controller.quickEntry.updateText('Write docs');
+        await harness.controller.quickEntry.submit();
+        await harness.controller.openQuickEntry();
+        expect(harness.controller.quickEntry.state.text, 'Write docs');
+        harness.window.closedRoles.clear();
+        harness.window.openedRoles.clear();
+        harness.window.focusedRoles.clear();
+
+        await harness.controller.stopTask();
+
+        final events = await harness.activityLog.allEvents();
+        expect(events.last.eventType, ActivityEventType.stopTask);
+        expect(events.last.source, ActivitySource.manualStop);
+        expect(harness.controller.activeRole, WindowRole.quickEntry);
+        expect(harness.controller.quickEntry.state.isOpen, isTrue);
+        expect(harness.controller.quickEntry.state.text, isEmpty);
+        expect(
+          harness.controller.snapshot!.runtimeState.promptState.status,
+          PromptStatus.none,
+        );
+        expect(harness.window.closedRoles, isEmpty);
+        expect(harness.window.openedRoles, isEmpty);
+        expect(harness.window.focusedRoles, [WindowRole.quickEntry]);
+      },
+    );
 
     test(
       'opening quick entry while tracking schedules response timeout',
@@ -484,6 +528,16 @@ void main() {
       expect(harness.window.focusedRoles.last, WindowRole.quickEntry);
     });
   });
+}
+
+Future<void> _waitUntil(bool Function() condition) async {
+  for (var attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+  fail('Timed out waiting for async controller action.');
 }
 
 final class _Harness {

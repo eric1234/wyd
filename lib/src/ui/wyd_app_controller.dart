@@ -117,8 +117,8 @@ final class WydAppController extends ChangeNotifier {
     return _snapshot!;
   }
 
-  Future<void> _openQuickEntry() async {
-    var latestSnapshot = await _trackerService.loadSnapshot();
+  Future<void> _openQuickEntry({AppStateSnapshot? snapshot}) async {
+    var latestSnapshot = snapshot ?? await _trackerService.loadSnapshot();
     final shouldMarkPromptVisible =
         latestSnapshot.activeTask != null &&
         latestSnapshot.runtimeState.promptState.status == PromptStatus.none;
@@ -175,14 +175,8 @@ final class WydAppController extends ChangeNotifier {
       source: ActivitySource.manualStop,
     );
     _snapshot = latestSnapshot;
-    final shouldCloseQuickEntryWindow = _activeRole == WindowRole.quickEntry;
     quickEntry.close();
-    if (shouldCloseQuickEntryWindow) {
-      await _windowCoordinator.close(WindowRole.quickEntry);
-    }
-    await _refreshTrayMenu(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
-    notifyListeners();
+    await _openQuickEntry(snapshot: latestSnapshot);
   }
 
   Future<void> handlePowerEvent(PowerEvent event) async {

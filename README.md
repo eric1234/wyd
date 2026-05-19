@@ -75,14 +75,8 @@ Run integration tests through the project script instead of invoking the
 ./tool/run_integration_tests.sh macos
 ```
 
-The script accepts a Flutter device ID and runs each
-`integration_test/*_test.dart` file in a separate Flutter process. Linux is the
-default target:
-
-```bash
-WYD_INTEGRATION_DEVICE=linux ./tool/run_integration_tests.sh
-WYD_INTEGRATION_DEVICE=macos ./tool/run_integration_tests.sh
-```
+The script accepts a Flutter device ID as its first argument and runs each
+`integration_test/*_test.dart` file in a separate Flutter process.
 
 This per-file runner is the standard project workflow for all platforms. It
 avoids a Flutter desktop integration-test harness issue where

@@ -4,11 +4,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-device="${WYD_INTEGRATION_DEVICE:-linux}"
-if [[ $# -gt 0 && "${1}" != -* ]]; then
-  device="${1}"
-  shift
+if [[ $# -eq 0 || "${1}" == -* ]]; then
+  echo "Usage: ${0##*/} <flutter-device-id> [flutter test args...]" >&2
+  exit 2
 fi
+
+device="${1}"
+shift
 
 shopt -s nullglob
 test_files=(integration_test/*_test.dart)

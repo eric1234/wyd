@@ -1,50 +1,59 @@
 # wyd
 
-`wyd` stands for "What's ya doin?" It is a tray-based desktop time tracker built with Flutter and Dart that stays out of the way in the system tray and periodically asks the user to confirm or correct the current task.
+`wyd` stands for "What's ya doin?" It is a tray-based desktop time tracker
+built with Flutter and Dart that stays out of the way in the system tray and
+periodically asks the user to confirm or correct the current task.
 
 ## History
 
-`wyd` is the spiritual successor to [`wd`](https://github.com/eric1234/wd), an Electron-based version of the same idea that built about a decade earlier. This implementation moves the app to Flutter because Electron proved too bulky and awkward for a small utility that is meant to live quietly in the system tray.
+`wyd` is the spiritual successor to [`wd`](https://github.com/eric1234/wd), an
+Electron-based version of the same idea that built about a decade earlier. This
+implementation moves the app to Flutter because Electron proved too bulky and
+awkward for a small utility that is meant to live quietly in the system tray.
 
 ## Getting Started
 
-1. Install the Flutter SDK from the official Flutter installation guide for your platform.
+1. Install the Flutter SDK from the official Flutter installation guide for
+   your platform.
 
-2. Verify Flutter and enable desktop support for the platform you are developing on:
+2. Verify Flutter and enable desktop support for the platform you are
+   developing on:
 
-```bash
-flutter doctor
-flutter config --enable-linux-desktop
-flutter config --enable-macos-desktop
-```
+   ```bash
+   flutter doctor
+   flutter config --enable-linux-desktop
+   flutter config --enable-macos-desktop
+   ```
 
-Windows runners are present from Flutter's project template, but the product currently gates the tray app to Linux and macOS while Windows waits for later tray-first lifecycle work.
+3. On Debian/Ubuntu Linux development machines, install the desktop build
+   dependencies used by Flutter, the tray plugin, SQLite native assets, and X11
+   idle detection:
 
-3. On Debian/Ubuntu Linux development machines, install the desktop build dependencies used by Flutter, the tray plugin, SQLite native assets, and X11 idle detection:
-
-```bash
-sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libsqlite3-dev libayatana-appindicator3-dev libxcb1-dev libxcb-screensaver0-dev lld-18
-```
+   ```bash
+   sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev \
+     libsqlite3-dev libayatana-appindicator3-dev libxcb1-dev \
+     libxcb-screensaver0-dev lld-18
+   ```
 
 4. Install project dependencies:
 
-```bash
-flutter pub get
-```
+   ```bash
+   flutter pub get
+   ```
 
 5. Run the app in development:
 
-```bash
-flutter run -d linux
-flutter run -d macos
-```
+   ```bash
+   flutter run -d linux
+   flutter run -d macos
+   ```
 
 6. Build a release binary:
 
-```bash
-flutter build linux --release
-flutter build macos --release
-```
+   ```bash
+   flutter build linux --release
+   flutter build macos --release
+   ```
 
 The built apps will be placed under `build/linux/` and `build/macos/`.
 
@@ -58,37 +67,57 @@ flutter test
 
 ## Integration Tests
 
-Run integration tests through the project script instead of invoking the `integration_test` directory directly:
+Run integration tests through the project script instead of invoking the
+`integration_test` directory directly:
 
 ```bash
 ./tool/run_integration_tests.sh linux
 ./tool/run_integration_tests.sh macos
 ```
 
-The script accepts a Flutter device ID and runs each `integration_test/*_test.dart` file in a separate Flutter process. Linux is the default target:
+The script accepts a Flutter device ID and runs each
+`integration_test/*_test.dart` file in a separate Flutter process. Linux is the
+default target:
 
 ```bash
 WYD_INTEGRATION_DEVICE=linux ./tool/run_integration_tests.sh
 WYD_INTEGRATION_DEVICE=macos ./tool/run_integration_tests.sh
 ```
 
-This per-file runner is the standard project workflow for all platforms. It avoids a Flutter desktop integration-test harness issue where `flutter test integration_test -d linux` can pass the first file and then fail a later app launch with `Error waiting for a debug connection`.
+This per-file runner is the standard project workflow for all platforms. It
+avoids a Flutter desktop integration-test harness issue where
+`flutter test integration_test -d linux` can pass the first file and then fail a
+later app launch with `Error waiting for a debug connection`.
 
 ## Platform Support Notes
 
-`wyd` is currently aimed at Linux and macOS. Windows support is not available yet and has not been tested.
+`wyd` is currently aimed at Linux and macOS. Windows support is not available
+yet and has not been tested.
 
 Known platform differences:
 
-- Linux has mostly been exercised on X11. Wayland is untested, so tray behavior and idle detection may depend on your desktop environment.
-- On Linux, hovering over the tray icon does not show the current task. Tray tooltips currently work on macOS only.
-- On Linux, clicking the tray icon opens the menu. macOS has separate click behavior: primary click opens quick entry, and secondary click opens the menu.
-- On macOS, locking the screen or putting the computer to sleep stops the active task automatically. Linux does not handle lock or sleep events yet.
-- Activity deferral depends on whether `wyd` can read your system idle time. If idle detection is unavailable, the setting is disabled.
-- Run on Login is expected to work on macOS. On Linux, it uses the standard desktop autostart mechanism, so it should work on mainstream desktop environments such as Cinnamon/Linux Mint, GNOME, KDE Plasma, Xfce, MATE, and LXQt. It may not work in bare window-manager or custom sessions that do not run desktop autostart entries.
+- Linux has mostly been exercised on X11. Wayland is untested, so tray behavior
+  and idle detection may depend on your desktop environment.
+- On Linux, hovering over the tray icon does not show the current task. Tray
+  tooltips currently work on macOS only.
+- On Linux, clicking the tray icon opens the menu. macOS has separate click
+  behavior: primary click opens quick entry, and secondary click opens the
+  menu.
+- On macOS, locking the screen or putting the computer to sleep stops the active
+  task automatically. Linux does not handle lock or sleep events yet.
+- Activity deferral depends on whether `wyd` can read your system idle time. If
+  idle detection is unavailable, the setting is disabled.
+- Run on Login is expected to work on macOS. On Linux, it uses the standard
+  desktop autostart mechanism, so it should work on mainstream desktop
+  environments such as Cinnamon/Linux Mint, GNOME, KDE Plasma, Xfce, MATE, and
+  LXQt. It may not work in bare window-manager or custom sessions that do not
+  run desktop autostart entries.
 
 ## License
 
-This project is released into the public domain under the Unlicense. The codebase is expected to be largely AI-written, and any copyrightable contributions are dedicated to the public domain accordingly.
+This project is released into the public domain under the Unlicense. The
+codebase is expected to be largely AI-written, and any copyrightable
+contributions are dedicated to the public domain accordingly.
 
-The software is provided "as is", without warranty or liability. See `UNLICENSE` for the full text.
+The software is provided "as is", without warranty or liability. See `UNLICENSE`
+for the full text.

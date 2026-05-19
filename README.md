@@ -74,6 +74,19 @@ WYD_INTEGRATION_DEVICE=macos ./tool/run_integration_tests.sh
 
 This per-file runner is the standard project workflow for all platforms. It avoids a Flutter desktop integration-test harness issue where `flutter test integration_test -d linux` can pass the first file and then fail a later app launch with `Error waiting for a debug connection`.
 
+## Platform Support Notes
+
+`wyd` is currently aimed at Linux and macOS. Windows support is not available yet and has not been tested.
+
+Known platform differences:
+
+- Linux has mostly been exercised on X11. Wayland is untested, so tray behavior and idle detection may depend on your desktop environment.
+- On Linux, hovering over the tray icon does not show the current task. Tray tooltips currently work on macOS only.
+- On Linux, clicking the tray icon opens the menu. macOS has separate click behavior: primary click opens quick entry, and secondary click opens the menu.
+- On macOS, locking the screen or putting the computer to sleep stops the active task automatically. Linux does not handle lock or sleep events yet.
+- Activity deferral depends on whether `wyd` can read your system idle time. If idle detection is unavailable, the setting is disabled.
+- Run on Login is expected to work on macOS. On Linux, it uses the standard desktop autostart mechanism, so it should work on mainstream desktop environments such as Cinnamon/Linux Mint, GNOME, KDE Plasma, Xfce, MATE, and LXQt. It may not work in bare window-manager or custom sessions that do not run desktop autostart entries.
+
 ## License
 
 This project is released into the public domain under the Unlicense. The codebase is expected to be largely AI-written, and any copyrightable contributions are dedicated to the public domain accordingly.

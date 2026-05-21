@@ -1,5 +1,6 @@
 export 'desktop_platform_bindings.dart';
 export 'event_channel_power_event_adapter.dart';
+export 'gnome_idle_user_idle_detector.dart';
 export 'launch_at_startup_adapter.dart';
 export 'method_channel_native_lifecycle_adapter.dart';
 export 'method_channel_single_instance_adapter.dart';

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../../application/application.dart';
 import 'event_channel_power_event_adapter.dart';
+import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'method_channel_native_lifecycle_adapter.dart';
 import 'system_idle_user_idle_detector.dart';
@@ -15,8 +16,20 @@ final class DesktopPlatformBindings {
     required this.nativeLifecycleAdapter,
   });
 
-  static Future<DesktopPlatformBindings> current() async {
-    final userIdleDetector = await SystemIdleUserIdleDetector.create();
+  static Future<DesktopPlatformBindings> current({
+    DiagnosticLogger logger = const EnvironmentDiagnosticLogger(),
+  }) async {
+    final systemIdleDetector = await SystemIdleUserIdleDetector.create(
+      logger: logger,
+    );
+    final userIdleDetector =
+        systemIdleDetector ??
+        (Platform.isLinux
+            ? await GnomeIdleUserIdleDetector.create(logger: logger)
+            : null);
+    logger.debug(
+      'idle detection capability: ${userIdleDetector != null ? 'supported' : 'unsupported'}',
+    );
     return DesktopPlatformBindings.forPlatform(
       isLinux: Platform.isLinux,
       isMacOS: Platform.isMacOS,

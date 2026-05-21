@@ -26,13 +26,12 @@ awkward for a small utility that is meant to live quietly in the system tray.
    ```
 
 3. On Debian/Ubuntu Linux development machines, install the desktop build
-   dependencies used by Flutter, the tray plugin, SQLite native assets, and X11
-   idle detection:
+   dependencies used by Flutter, the tray plugin, and idle detection:
 
    ```bash
    sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev \
-     libsqlite3-dev libayatana-appindicator3-dev libxcb1-dev \
-     libxcb-screensaver0-dev lld-18
+     libayatana-appindicator3-dev libxcb1-dev libxcb-screensaver0-dev \
+     libwayland-dev lld-18
    ```
 
 4. Install project dependencies:
@@ -90,8 +89,8 @@ yet and has not been tested.
 
 Known platform differences:
 
-- Linux has mostly been exercised on X11. Wayland is untested, so tray behavior
-  and idle detection may depend on your desktop environment.
+- Linux has been tested on Mint (X11/Cinnamon) and Ubuntu (Wayland/Gnome).
+  Others may or may not work but testing on those is coming.
 - On Linux, hovering over the tray icon does not show the current task. Tray
   tooltips currently work on macOS only.
 - On Linux, clicking the tray icon opens the menu. macOS has separate click
@@ -99,13 +98,6 @@ Known platform differences:
   menu.
 - On macOS, locking the screen or putting the computer to sleep stops the active
   task automatically. Linux does not handle lock or sleep events yet.
-- Activity deferral depends on whether `wyd` can read your system idle time. If
-  idle detection is unavailable, the setting is disabled.
-- Run on Login is expected to work on macOS. On Linux, it uses the standard
-  desktop autostart mechanism, so it should work on mainstream desktop
-  environments such as Cinnamon/Linux Mint, GNOME, KDE Plasma, Xfce, MATE, and
-  LXQt. It may not work in bare window-manager or custom sessions that do not
-  run desktop autostart entries.
 
 ## License
 

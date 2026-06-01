@@ -15,6 +15,9 @@ struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   FlMethodChannel* single_instance_channel;
+  FlMethodChannel* linux_window_attention_channel;
+  GtkWindow* primary_window;
+  FlView* primary_view;
   gboolean pending_second_instance_activation;
 };
 
@@ -30,6 +33,91 @@ static void single_instance_method_call_cb(FlMethodChannel* channel,
     gboolean pending = self->pending_second_instance_activation;
     self->pending_second_instance_activation = FALSE;
     g_autoptr(FlValue) result = fl_value_new_bool(pending);
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
+static gboolean present_primary_window_for_input(MyApplication* self) {
+  if (self->primary_window == nullptr) {
+    return FALSE;
+  }
+
+  GtkWindow* window = self->primary_window;
+  GtkWidget* window_widget = GTK_WIDGET(window);
+  gtk_window_set_accept_focus(window, TRUE);
+  gtk_window_set_focus_on_map(window, TRUE);
+  gtk_window_set_urgency_hint(window, FALSE);
+
+  if (!gtk_widget_get_realized(window_widget)) {
+    gtk_widget_realize(window_widget);
+  }
+
+  gtk_window_deiconify(window);
+  gtk_widget_show(window_widget);
+
+#ifdef GDK_WINDOWING_X11
+  GdkWindow* gdk_window = gtk_widget_get_window(window_widget);
+  if (gdk_window != nullptr && GDK_IS_X11_WINDOW(gdk_window)) {
+    GdkEventMask events = gdk_window_get_events(gdk_window);
+    gdk_window_set_events(
+        gdk_window,
+        static_cast<GdkEventMask>(events | GDK_PROPERTY_CHANGE_MASK));
+    guint32 timestamp = gdk_x11_get_server_time(gdk_window);
+    gdk_x11_window_set_user_time(gdk_window, timestamp);
+    gtk_window_present_with_time(window, timestamp);
+  } else {
+    gtk_window_present(window);
+  }
+#else
+  gtk_window_present(window);
+#endif
+
+  if (self->primary_view != nullptr) {
+    gtk_widget_grab_focus(GTK_WIDGET(self->primary_view));
+  }
+
+  return TRUE;
+}
+
+static void set_primary_window_urgent(MyApplication* self, gboolean urgent) {
+  if (self->primary_window == nullptr) {
+    return;
+  }
+
+  gtk_window_set_urgency_hint(self->primary_window, urgent);
+}
+
+static void linux_window_attention_method_call_cb(FlMethodChannel* channel,
+                                                  FlMethodCall* method_call,
+                                                  gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  const gchar* method = fl_method_call_get_name(method_call);
+
+  if (g_strcmp0(method, "presentForInput") == 0) {
+    g_autoptr(FlValue) result =
+        fl_value_new_bool(present_primary_window_for_input(self));
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  if (g_strcmp0(method, "setUrgent") == 0) {
+    FlValue* args = fl_method_call_get_args(method_call);
+    FlValue* urgent_value =
+        args != nullptr ? fl_value_lookup_string(args, "urgent") : nullptr;
+    gboolean urgent =
+        urgent_value != nullptr ? fl_value_get_bool(urgent_value) : FALSE;
+    set_primary_window_urgent(self, urgent);
+
+    g_autoptr(FlValue) result = fl_value_new_bool(TRUE);
     g_autoptr(FlMethodResponse) response =
         FL_METHOD_RESPONSE(fl_method_success_response_new(result));
     fl_method_call_respond(method_call, response, nullptr);
@@ -57,6 +145,7 @@ static void my_application_activate(GApplication* application) {
 
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->primary_window = window;
 
   // Use the bundled logo for Linux window switchers and docks.
   g_autofree gchar* executable_path =
@@ -107,6 +196,7 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
+  self->primary_view = view;
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
@@ -150,6 +240,12 @@ static void my_application_activate(GApplication* application) {
   fl_method_channel_set_method_call_handler(self->single_instance_channel,
                                             single_instance_method_call_cb,
                                             self, nullptr);
+  self->linux_window_attention_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "dev.wyd.tracker/linux_window_attention", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->linux_window_attention_channel,
+      linux_window_attention_method_call_cb, self, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -198,6 +294,7 @@ static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_object(&self->single_instance_channel);
+  g_clear_object(&self->linux_window_attention_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

@@ -16,6 +16,7 @@ void main() {
     late bool isMaximized;
     late bool isMinimized;
     late bool isVisible;
+    late bool isFocused;
     late bool isPreventClose;
 
     setUp(() {
@@ -24,6 +25,7 @@ void main() {
       isMaximized = false;
       isMinimized = false;
       isVisible = false;
+      isFocused = true;
       isPreventClose = false;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(windowManagerChannel, (call) async {
@@ -33,6 +35,7 @@ void main() {
               'isMaximized' => isMaximized,
               'isMinimized' => isMinimized,
               'isVisible' => isVisible,
+              'isFocused' => isFocused,
               'isPreventClose' => isPreventClose,
               'setFullScreen' => isFullScreen = _boolArgument(
                 call.arguments,
@@ -41,6 +44,7 @@ void main() {
               'unmaximize' => isMaximized = false,
               'restore' => isMinimized = false,
               'show' => isVisible = true,
+              'focus' => isFocused = true,
               'hide' => isVisible = false,
               'close' => isVisible = false,
               'setPreventClose' => isPreventClose = _boolArgument(
@@ -76,8 +80,17 @@ void main() {
           .setMockMethodCallHandler(screenRetrieverChannel, null);
     });
 
+    SingleFlutterWindowAdapter buildAdapter([
+      _FakeWindowAttentionAdapter? windowAttentionAdapter,
+    ]) {
+      return SingleFlutterWindowAdapter(
+        windowAttentionAdapter:
+            windowAttentionAdapter ?? _FakeWindowAttentionAdapter(),
+      );
+    }
+
     test('applies role size before showing the native window', () async {
-      final adapter = SingleFlutterWindowAdapter();
+      final adapter = buildAdapter();
       final reportConfiguration = WindowRoleConfiguration.forRole(
         WindowRole.report,
       );
@@ -100,7 +113,7 @@ void main() {
     });
 
     test('applies quick-entry fixed-size window constraints', () async {
-      final adapter = SingleFlutterWindowAdapter();
+      final adapter = buildAdapter();
 
       await adapter.open(WindowRoleConfiguration.quickEntry());
 
@@ -143,7 +156,7 @@ void main() {
     });
 
     test('hides resident startup window when no role is open', () async {
-      final adapter = SingleFlutterWindowAdapter();
+      final adapter = buildAdapter();
 
       await adapter.hideResidentWindow();
 
@@ -151,7 +164,7 @@ void main() {
     });
 
     test('does not hide an open role window as resident startup', () async {
-      final adapter = SingleFlutterWindowAdapter();
+      final adapter = buildAdapter();
       await adapter.open(WindowRoleConfiguration.quickEntry());
       windowCalls.clear();
 
@@ -160,13 +173,77 @@ void main() {
       expect(windowCalls.any((call) => call.method == 'hide'), isFalse);
     });
 
+    test('uses native window attention when focusing primary window', () async {
+      final attentionAdapter = _FakeWindowAttentionAdapter();
+      final adapter = buildAdapter(attentionAdapter);
+      final handle = await adapter.open(WindowRoleConfiguration.quickEntry());
+      windowCalls.clear();
+      attentionAdapter.clear();
+
+      await adapter.focus(handle);
+
+      expect(windowCalls.where((call) => call.method == 'show'), hasLength(1));
+      expect(windowCalls.where((call) => call.method == 'focus'), isEmpty);
+      expect(attentionAdapter.calls, contains('presentForInput'));
+      expect(attentionAdapter.urgentValues.last, isFalse);
+    });
+
+    test(
+      'falls back to window manager focus without native attention',
+      () async {
+        final attentionAdapter = _FakeWindowAttentionAdapter(
+          presentResult: false,
+        );
+        final adapter = buildAdapter(attentionAdapter);
+        final handle = await adapter.open(WindowRoleConfiguration.quickEntry());
+        windowCalls.clear();
+        attentionAdapter.clear();
+
+        await adapter.focus(handle);
+
+        expect(attentionAdapter.calls, contains('presentForInput'));
+        expect(
+          windowCalls.where((call) => call.method == 'focus'),
+          hasLength(1),
+        );
+      },
+    );
+
+    test('marks shown window urgent when focus is denied', () async {
+      final attentionAdapter = _FakeWindowAttentionAdapter();
+      final adapter = buildAdapter(attentionAdapter);
+      final handle = await adapter.open(WindowRoleConfiguration.quickEntry());
+      windowCalls.clear();
+      attentionAdapter.clear();
+      isFocused = false;
+
+      await adapter.focus(handle);
+
+      expect(windowCalls.where((call) => call.method == 'show'), hasLength(1));
+      expect(windowCalls.where((call) => call.method == 'focus'), isEmpty);
+      expect(attentionAdapter.urgentValues, [false, true]);
+    });
+
+    test('clears urgency before hiding the native window', () async {
+      final attentionAdapter = _FakeWindowAttentionAdapter();
+      final adapter = buildAdapter(attentionAdapter);
+      final handle = await adapter.open(WindowRoleConfiguration.quickEntry());
+      windowCalls.clear();
+      attentionAdapter.clear();
+
+      await adapter.close(handle);
+
+      expect(attentionAdapter.urgentValues, [false]);
+      expect(windowCalls.any((call) => call.method == 'hide'), isTrue);
+    });
+
     test(
       'normalizes fullscreen maximized and minimized states before sizing',
       () async {
         isFullScreen = true;
         isMaximized = true;
         isMinimized = true;
-        final adapter = SingleFlutterWindowAdapter();
+        final adapter = buildAdapter();
 
         await adapter.open(
           WindowRoleConfiguration.forRole(WindowRole.settings),
@@ -188,7 +265,7 @@ void main() {
     test(
       'native close hides and emits close request for current handle',
       () async {
-        final adapter = SingleFlutterWindowAdapter();
+        final adapter = buildAdapter();
         final handle = await adapter.open(WindowRoleConfiguration.quickEntry());
 
         final closeRequest = expectLater(
@@ -275,6 +352,31 @@ bool _boolArgument(Object? arguments, String key) {
     return Map<Object?, Object?>.from(arguments)[key] as bool;
   }
   throw ArgumentError.value(arguments, 'arguments', 'Expected bool argument.');
+}
+
+final class _FakeWindowAttentionAdapter implements WindowAttentionAdapter {
+  _FakeWindowAttentionAdapter({this.presentResult = true});
+
+  bool presentResult;
+  final List<String> calls = [];
+  final List<bool> urgentValues = [];
+
+  @override
+  Future<bool> presentForInput() async {
+    calls.add('presentForInput');
+    return presentResult;
+  }
+
+  @override
+  Future<void> setUrgent(bool urgent) async {
+    calls.add('setUrgent');
+    urgentValues.add(urgent);
+  }
+
+  void clear() {
+    calls.clear();
+    urgentValues.clear();
+  }
 }
 
 Map<String, Object?> _display() {

@@ -1,16 +1,71 @@
 import 'dart:async';
-import 'dart:ui';
+import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../application/application.dart';
 
+abstract interface class WindowAttentionAdapter {
+  Future<bool> presentForInput();
+
+  Future<void> setUrgent(bool urgent);
+}
+
+final class MethodChannelLinuxWindowAttentionAdapter
+    implements WindowAttentionAdapter {
+  const MethodChannelLinuxWindowAttentionAdapter({
+    MethodChannel channel = const MethodChannel(_channelName),
+  }) : _channel = channel;
+
+  static const _channelName = 'dev.wyd.tracker/linux_window_attention';
+
+  final MethodChannel _channel;
+
+  @override
+  Future<bool> presentForInput() async {
+    if (!Platform.isLinux) {
+      return false;
+    }
+
+    try {
+      return await _channel.invokeMethod<bool>('presentForInput') ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> setUrgent(bool urgent) async {
+    if (!Platform.isLinux) {
+      return;
+    }
+
+    try {
+      await _channel.invokeMethod<bool>('setUrgent', {'urgent': urgent});
+    } on MissingPluginException {
+      return;
+    } on PlatformException {
+      return;
+    }
+  }
+}
+
 final class SingleFlutterWindowAdapter
     with WindowListener
     implements WindowAdapter {
-  SingleFlutterWindowAdapter({WindowManager? windowManager})
-    : _windowManager = windowManager ?? windowManagerInstance,
-      _configurator = DesktopWindowConfigurator(windowManager: windowManager);
+  SingleFlutterWindowAdapter({
+    WindowManager? windowManager,
+    WindowAttentionAdapter? windowAttentionAdapter,
+  }) : _windowManager = windowManager ?? windowManagerInstance,
+       _configurator = DesktopWindowConfigurator(
+         windowManager: windowManager,
+         windowAttentionAdapter:
+             windowAttentionAdapter ??
+             const MethodChannelLinuxWindowAttentionAdapter(),
+       );
 
   final WindowManager _windowManager;
   final DesktopWindowConfigurator _configurator;
@@ -55,9 +110,8 @@ final class SingleFlutterWindowAdapter
   }
 
   @override
-  Future<void> focus(WindowHandle handle) async {
-    await _windowManager.show();
-    await _windowManager.focus();
+  Future<void> focus(WindowHandle handle) {
+    return _configurator.showAndFocusInPlace();
   }
 
   @override
@@ -73,6 +127,7 @@ final class SingleFlutterWindowAdapter
     if (_currentHandle?.id == handle.id) {
       _currentHandle = null;
     }
+    await _configurator.clearAttention();
     await _windowManager.hide();
   }
 
@@ -112,6 +167,7 @@ final class SingleFlutterWindowAdapter
       }
 
       final handle = _currentHandle;
+      await _configurator.clearAttention();
       await _windowManager.hide();
       if (handle != null && !_closeRequests.isClosed) {
         _currentHandle = null;
@@ -124,12 +180,17 @@ final class SingleFlutterWindowAdapter
 }
 
 final class DesktopWindowConfigurator {
-  DesktopWindowConfigurator({WindowManager? windowManager})
-    : _windowManager = windowManager ?? windowManagerInstance;
+  DesktopWindowConfigurator({
+    WindowManager? windowManager,
+    WindowAttentionAdapter? windowAttentionAdapter,
+  }) : _windowManager = windowManager ?? windowManagerInstance,
+       _windowAttentionAdapter = windowAttentionAdapter;
 
   static const _unconstrainedMaximumSize = Size(10000, 10000);
+  static const _focusStateDelay = Duration(milliseconds: 100);
 
   final WindowManager _windowManager;
+  final WindowAttentionAdapter? _windowAttentionAdapter;
 
   Future<void> apply(WindowRoleConfiguration configuration) async {
     final size = Size(configuration.width, configuration.height);
@@ -162,8 +223,33 @@ final class DesktopWindowConfigurator {
 
   Future<void> showAndFocus() async {
     await _windowManager.center();
+    await showAndFocusInPlace();
+  }
+
+  Future<void> showAndFocusInPlace() async {
+    await clearAttention();
     await _windowManager.show();
-    await _windowManager.focus();
+    final presentedForInput =
+        await _windowAttentionAdapter?.presentForInput() ?? false;
+    if (!presentedForInput) {
+      await _windowManager.focus();
+    }
+    await Future<void>.delayed(_focusStateDelay);
+
+    if (!await _windowManager.isVisible()) {
+      await clearAttention();
+      return;
+    }
+    if (await _windowManager.isFocused()) {
+      await clearAttention();
+      return;
+    }
+
+    await _windowAttentionAdapter?.setUrgent(true);
+  }
+
+  Future<void> clearAttention() async {
+    await _windowAttentionAdapter?.setUrgent(false);
   }
 
   Future<void> close() {

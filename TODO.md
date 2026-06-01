@@ -1,0 +1,27 @@
+- [ ] Write up platform manual tests checklist
+- [ ] Test suspend/resume on Mac
+- [ ] Setup repo to follow best practices (PRs, protected branches, etc)
+- [ ] Setup CI to run unit/integrated tests for supported platforms on every push
+- [ ] Setup CI to run static analysis (standard Dart tools + AI reviews)
+- [ ] On Mac, sometime the windows appears on other desktops I think.
+  It should always appear on the current desktop.
+- [ ] Enable suspend/resume on Linux
+- [ ] Get application working on Windows
+- [ ] Create build process that generates release and nightly binaries as zip
+- [ ] Expand build process to create deb package
+- [ ] Expand build process to create rpm package
+- [ ] Expand build process to create other common Linux package types
+- [ ] Expand build process to create package for Mac
+- [ ] Expand build process to create package for Windows
+- [ ] Improve README.md to aim more at users with just slight references for devs
+- [ ] Create website likely via Github Pages for the app
+- [ ] Port out focus fix on X11 to Dart plugin
+- [ ] Fix Dart plugin on Linux to support secondary clicks
+- [ ] Fix Dart plugin on Linux to support tooltips
+- [ ] Port any other platform specific stuff to relevant Dart plugins
+- [ ] Get into Apple store
+- [ ] Get into Homebrew
+- [ ] Get into Windows store
+- [ ] Setup Apt repos to auto-update
+- [ ] Setup Yum repos to auto-update
+- [ ] Any other repos to auto-update

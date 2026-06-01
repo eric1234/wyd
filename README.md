@@ -84,20 +84,33 @@ later app launch with `Error waiting for a debug connection`.
 
 ## Platform Support Notes
 
-`wyd` is currently aimed at Linux and macOS. Windows support is not available
-yet and has not been tested.
+Platforms:
 
-Known platform differences:
+- [x] Tested on Ubuntu, Mint and Fedora is in progress.
+- [x] MacOS
+- [ ] Windows
 
-- Linux has been tested on Mint (X11/Cinnamon) and Ubuntu (Wayland/Gnome).
-  Others may or may not work but testing on those is coming.
-- On Linux, hovering over the tray icon does not show the current task. Tray
-  tooltips currently work on macOS only.
-- On Linux, clicking the tray icon opens the menu. macOS has separate click
-  behavior: primary click opens quick entry, and secondary click opens the
-  menu.
-- On macOS, locking the screen or putting the computer to sleep stops the active
-  task automatically. Linux does not handle lock or sleep events yet.
+Linux limitations:
+
+- Hovering over the tray icon does not show the current task.
+- Clicking tray icon launches menu as secondary click not supported.
+- Does not handle lock/sleep events (Mac is untested for this but the code exists).
+- The nag window does not auto-focus on Mint (probably due to X11)
+
+### Fedora
+
+On Fedora, run the following to enable tray support. First install the software:
+
+```bash
+sudo dnf install libayatana-appindicator-gtk3 gnome-shell-extension-appindicator
+```
+
+Next, log out and back in to make that software available to your desktop.
+Finally enable the extension.
+
+```bash
+gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+```
 
 ## License
 

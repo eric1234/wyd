@@ -95,7 +95,6 @@ Linux limitations:
 - Hovering over the tray icon does not show the current task.
 - Clicking tray icon launches menu as secondary click not supported.
 - Does not handle lock/sleep events (Mac is untested for this but the code exists).
-- The nag window does not auto-focus on Mint (probably due to X11)
 
 ### Fedora
 

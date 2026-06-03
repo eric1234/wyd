@@ -11,13 +11,17 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+struct LinuxWindowAttentionTarget {
+  GtkWindow* window;
+  FlView* view;
+};
+
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   FlMethodChannel* single_instance_channel;
   FlMethodChannel* linux_window_attention_channel;
-  GtkWindow* primary_window;
-  FlView* primary_view;
+  LinuxWindowAttentionTarget primary_attention_target;
   gboolean pending_second_instance_activation;
 };
 
@@ -44,12 +48,12 @@ static void single_instance_method_call_cb(FlMethodChannel* channel,
   fl_method_call_respond(method_call, response, nullptr);
 }
 
-static gboolean present_primary_window_for_input(MyApplication* self) {
-  if (self->primary_window == nullptr) {
+static gboolean present_window_for_input(LinuxWindowAttentionTarget* target) {
+  if (target == nullptr || target->window == nullptr) {
     return FALSE;
   }
 
-  GtkWindow* window = self->primary_window;
+  GtkWindow* window = target->window;
   GtkWidget* window_widget = GTK_WIDGET(window);
   gtk_window_set_accept_focus(window, TRUE);
   gtk_window_set_focus_on_map(window, TRUE);
@@ -79,30 +83,32 @@ static gboolean present_primary_window_for_input(MyApplication* self) {
   gtk_window_present(window);
 #endif
 
-  if (self->primary_view != nullptr) {
-    gtk_widget_grab_focus(GTK_WIDGET(self->primary_view));
+  if (target->view != nullptr) {
+    gtk_widget_grab_focus(GTK_WIDGET(target->view));
   }
 
   return TRUE;
 }
 
-static void set_primary_window_urgent(MyApplication* self, gboolean urgent) {
-  if (self->primary_window == nullptr) {
+static void set_window_urgent(LinuxWindowAttentionTarget* target,
+                              gboolean urgent) {
+  if (target == nullptr || target->window == nullptr) {
     return;
   }
 
-  gtk_window_set_urgency_hint(self->primary_window, urgent);
+  gtk_window_set_urgency_hint(target->window, urgent);
 }
 
 static void linux_window_attention_method_call_cb(FlMethodChannel* channel,
                                                   FlMethodCall* method_call,
                                                   gpointer user_data) {
-  MyApplication* self = MY_APPLICATION(user_data);
+  LinuxWindowAttentionTarget* target =
+      static_cast<LinuxWindowAttentionTarget*>(user_data);
   const gchar* method = fl_method_call_get_name(method_call);
 
   if (g_strcmp0(method, "presentForInput") == 0) {
     g_autoptr(FlValue) result =
-        fl_value_new_bool(present_primary_window_for_input(self));
+        fl_value_new_bool(present_window_for_input(target));
     g_autoptr(FlMethodResponse) response =
         FL_METHOD_RESPONSE(fl_method_success_response_new(result));
     fl_method_call_respond(method_call, response, nullptr);
@@ -115,7 +121,7 @@ static void linux_window_attention_method_call_cb(FlMethodChannel* channel,
         args != nullptr ? fl_value_lookup_string(args, "urgent") : nullptr;
     gboolean urgent =
         urgent_value != nullptr ? fl_value_get_bool(urgent_value) : FALSE;
-    set_primary_window_urgent(self, urgent);
+    set_window_urgent(target, urgent);
 
     g_autoptr(FlValue) result = fl_value_new_bool(TRUE);
     g_autoptr(FlMethodResponse) response =
@@ -127,6 +133,41 @@ static void linux_window_attention_method_call_cb(FlMethodChannel* channel,
   g_autoptr(FlMethodResponse) response =
       FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   fl_method_call_respond(method_call, response, nullptr);
+}
+
+static FlMethodChannel* register_linux_window_attention_channel(
+    FlBinaryMessenger* messenger,
+    LinuxWindowAttentionTarget* target,
+    GDestroyNotify target_destroy_notify) {
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  FlMethodChannel* channel = fl_method_channel_new(
+      messenger, "dev.wyd.tracker/linux_window_attention",
+      FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      channel, linux_window_attention_method_call_cb, target,
+      target_destroy_notify);
+  return channel;
+}
+
+static void register_child_linux_window_attention_channel(
+    FlPluginRegistry* registry) {
+  g_autoptr(FlPluginRegistrar) registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry,
+                                                  "WydLinuxWindowAttention");
+  FlView* view = fl_plugin_registrar_get_view(registrar);
+  GtkWidget* toplevel = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  if (!GTK_IS_WINDOW(toplevel)) {
+    return;
+  }
+
+  LinuxWindowAttentionTarget* target = g_new0(LinuxWindowAttentionTarget, 1);
+  target->window = GTK_WINDOW(toplevel);
+  target->view = view;
+
+  FlMethodChannel* channel = register_linux_window_attention_channel(
+      fl_plugin_registrar_get_messenger(registrar), target, g_free);
+  g_object_set_data_full(G_OBJECT(view), "wyd-linux-window-attention-channel",
+                         channel, g_object_unref);
 }
 
 // Implements GApplication::activate.
@@ -145,7 +186,7 @@ static void my_application_activate(GApplication* application) {
 
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
-  self->primary_window = window;
+  self->primary_attention_target.window = window;
 
   // Use the bundled logo for Linux window switchers and docks.
   g_autofree gchar* executable_path =
@@ -196,7 +237,7 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
-  self->primary_view = view;
+  self->primary_attention_target.view = view;
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
@@ -231,6 +272,8 @@ static void my_application_activate(GApplication* application) {
             fl_plugin_registry_get_registrar_for_plugin(
                 registry, "WindowManagerPlugin");
         window_manager_plugin_register_with_registrar(window_manager_registrar);
+
+        register_child_linux_window_attention_channel(registry);
       });
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
@@ -240,12 +283,9 @@ static void my_application_activate(GApplication* application) {
   fl_method_channel_set_method_call_handler(self->single_instance_channel,
                                             single_instance_method_call_cb,
                                             self, nullptr);
-  self->linux_window_attention_channel = fl_method_channel_new(
+  self->linux_window_attention_channel = register_linux_window_attention_channel(
       fl_engine_get_binary_messenger(fl_view_get_engine(view)),
-      "dev.wyd.tracker/linux_window_attention", FL_METHOD_CODEC(codec));
-  fl_method_channel_set_method_call_handler(
-      self->linux_window_attention_channel,
-      linux_window_attention_method_call_cb, self, nullptr);
+      &self->primary_attention_target, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

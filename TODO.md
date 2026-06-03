@@ -1,6 +1,3 @@
-- [ ] Setting/Report launches in background on Linux Mint.
-  Need to see if this is happening on MacOS or Wayland-based.
-  Only happens if some other app had focus before launching those windows.
 - [ ] Test suspend/resume on Mac
 - [ ] Setup repo to follow best practices (PRs, protected branches, etc)
 - [ ] Setup CI to run unit/integrated tests for supported platforms on every push

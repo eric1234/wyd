@@ -141,7 +141,9 @@ Future<void> _runRoleWindow(
     platformBindings.capabilities,
   );
   final windowConfiguration = WindowRoleConfiguration.forRole(role);
-  final windowConfigurator = DesktopWindowConfigurator();
+  final windowConfigurator = DesktopWindowConfigurator(
+    windowAttentionAdapter: const MethodChannelLinuxWindowAttentionAdapter(),
+  );
   ReportController? reportController;
   SettingsController? settingsController;
   final closeHandler = HideOnCloseWindowHandler(

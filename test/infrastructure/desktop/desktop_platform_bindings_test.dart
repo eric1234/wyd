@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/infrastructure/desktop/desktop.dart';
@@ -25,8 +27,42 @@ void main() {
       );
     });
 
+    test('exposes injected Linux D-Bus power adapter', () {
+      final powerEventAdapter = _FakePowerEventAdapter();
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        linuxPowerEventAdapterFactory: () => powerEventAdapter,
+      );
+
+      expect(bindings.capabilities.supportsPowerEvents, isTrue);
+      expect(bindings.powerEventAdapter, same(powerEventAdapter));
+    });
+
+    test('falls back when Linux power adapter factory returns null', () {
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        linuxPowerEventAdapterFactory: () => null,
+      );
+
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+    });
+
+    test('falls back when Linux power adapter factory fails', () {
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        linuxPowerEventAdapterFactory: () => throw StateError('D-Bus failed'),
+      );
+
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+    });
+
     test(
-      'enables macOS tray lifecycle, power, and start-at-login bindings',
+      'enables macOS tray lifecycle, plugin power, and start-at-login bindings',
       () {
         final startupAtLogin = _FakeStartupAtLoginAdapter();
         final bindings = DesktopPlatformBindings.forPlatform(
@@ -43,7 +79,7 @@ void main() {
         expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
         expect(
           bindings.powerEventAdapter,
-          isA<EventChannelPowerEventAdapter>(),
+          isA<DesktopScreenStatePowerEventAdapter>(),
         );
         expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
         expect(
@@ -121,4 +157,9 @@ final class _FakeUserIdleDetector implements UserIdleDetector {
   @override
   Future<Duration?> promptDeferralFor(Duration minimumIdleDuration) async =>
       null;
+}
+
+final class _FakePowerEventAdapter implements PowerEventAdapter {
+  @override
+  Stream<PowerEvent> get events => const Stream.empty();
 }

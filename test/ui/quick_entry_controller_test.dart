@@ -18,6 +18,44 @@ void main() {
       expect(controller.state.selectAllOnOpen, isFalse);
     });
 
+    test('opens idle and highlights first recent suggestion', () async {
+      final recentSuggestions = [
+        _suggestion('Write docs'),
+        _suggestion('Fix bug'),
+      ];
+      final client = _FakeQuickEntryClient(
+        suggestionsByQuery: {'': recentSuggestions},
+      );
+      final controller = _controller(client);
+
+      await controller.open(
+        _snapshot(activeTask: null, recentSuggestions: recentSuggestions),
+      );
+
+      expect(controller.state.text, isEmpty);
+      expect(
+        controller.state.suggestions.map((suggestion) => suggestion.taskText),
+        ['Write docs', 'Fix bug'],
+      );
+      expect(controller.state.highlightedIndex, 0);
+      expect(controller.state.highlightedSuggestion?.taskText, 'Write docs');
+    });
+
+    test('submits highlighted recent suggestion when text is empty', () async {
+      final recentSuggestions = [_suggestion('Write docs')];
+      final client = _FakeQuickEntryClient(
+        suggestionsByQuery: {'': recentSuggestions},
+      );
+      final controller = _controller(client);
+      await controller.open(
+        _snapshot(activeTask: null, recentSuggestions: recentSuggestions),
+      );
+
+      await controller.submit();
+
+      expect(client.submittedTexts, ['Write docs']);
+    });
+
     test(
       'opens active task with selected current text and recent tasks',
       () async {

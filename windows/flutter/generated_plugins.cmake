@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_multi_window
+  desktop_screenstate
   screen_retriever_windows
   tray_manager
   window_manager

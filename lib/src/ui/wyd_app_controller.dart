@@ -176,12 +176,7 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> stopTask() async {
-    final latestSnapshot = await _trackerService.stopTask(
-      source: ActivitySource.manualStop,
-    );
-    _snapshot = latestSnapshot;
-    quickEntry.close();
-    await _openQuickEntry(snapshot: latestSnapshot);
+    await _stopTaskAndOpenPrompt(ActivitySource.manualStop);
   }
 
   Future<void> handlePowerEvent(PowerEvent event) async {
@@ -194,21 +189,10 @@ final class WydAppController extends ChangeNotifier {
       return;
     }
 
-    final latestSnapshot = await _trackerService.stopTask(
-      source: switch (event) {
-        PowerEvent.lock => ActivitySource.systemLock,
-        PowerEvent.sleep => ActivitySource.systemSleep,
-      },
-    );
-    _snapshot = latestSnapshot;
-    final shouldCloseQuickEntryWindow = _activeRole == WindowRole.quickEntry;
-    quickEntry.close();
-    if (shouldCloseQuickEntryWindow) {
-      await _windowCoordinator.close(WindowRole.quickEntry);
-    }
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
-    notifyListeners();
+    await _stopTaskAndOpenPrompt(switch (event) {
+      PowerEvent.lock => ActivitySource.systemLock,
+      PowerEvent.sleep => ActivitySource.systemSleep,
+    });
   }
 
   Future<AppStateSnapshot> nagPromptTimedOut() async {
@@ -350,6 +334,13 @@ final class WydAppController extends ChangeNotifier {
     await _trayAdapter.updateIcon(TrayMenuPresenter.buildIconStatus(snapshot));
     await _trayAdapter.updateTooltip(TrayMenuPresenter.buildTooltip(snapshot));
     await _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
+  }
+
+  Future<void> _stopTaskAndOpenPrompt(ActivitySource source) async {
+    final latestSnapshot = await _trackerService.stopTask(source: source);
+    _snapshot = latestSnapshot;
+    quickEntry.close();
+    await _openQuickEntry(snapshot: latestSnapshot);
   }
 
   void _scheduleSecondaryWindowWarmUp() {

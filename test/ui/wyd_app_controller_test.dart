@@ -469,30 +469,40 @@ void main() {
       },
     );
 
-    test('lock event stops an active task with system lock source', () async {
-      final harness = await _Harness.create(withScheduler: true);
-      addTearDown(harness.dispose);
-      await harness.controller.initialize();
-      await harness.controller.openQuickEntry();
-      await harness.controller.quickEntry.updateText('Write docs');
-      await harness.controller.quickEntry.submit();
+    test(
+      'lock event stops active task with system lock source and opens quick entry',
+      () async {
+        final harness = await _Harness.create(withScheduler: true);
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        await harness.controller.openQuickEntry();
+        await harness.controller.quickEntry.updateText('Write docs');
+        await harness.controller.quickEntry.submit();
 
-      await harness.controller.handlePowerEvent(PowerEvent.lock);
+        await harness.controller.handlePowerEvent(PowerEvent.lock);
 
-      final events = await harness.activityLog.allEvents();
-      expect(events.last.eventType, ActivityEventType.stopTask);
-      expect(events.last.source, ActivitySource.systemLock);
-      expect(
-        harness.tray.latestEntries
-            .singleWhere((entry) => entry.action == TrayMenuAction.stopTask)
-            .enabled,
-        isFalse,
-      );
-      expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
-      expect(harness.timers.activeTimers, isEmpty);
-    });
+        final events = await harness.activityLog.allEvents();
+        expect(events.last.eventType, ActivityEventType.stopTask);
+        expect(events.last.source, ActivitySource.systemLock);
+        expect(
+          harness.tray.latestEntries
+              .singleWhere((entry) => entry.action == TrayMenuAction.stopTask)
+              .enabled,
+          isFalse,
+        );
+        expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+        expect(harness.timers.activeTimers, isEmpty);
+        expect(harness.controller.activeRole, WindowRole.quickEntry);
+        expect(harness.controller.quickEntry.state.isOpen, isTrue);
+        expect(harness.controller.quickEntry.state.text, isEmpty);
+        expect(
+          harness.controller.quickEntry.state.highlightedSuggestion?.taskText,
+          'Write docs',
+        );
+      },
+    );
 
-    test('sleep event stops active task and dismisses quick entry', () async {
+    test('sleep event stops active task and leaves quick entry open', () async {
       final harness = await _Harness.create();
       addTearDown(harness.dispose);
       await harness.controller.initialize();
@@ -500,15 +510,45 @@ void main() {
       await harness.controller.quickEntry.updateText('Write docs');
       await harness.controller.quickEntry.submit();
       await harness.controller.openQuickEntry();
+      harness.window.closedRoles.clear();
 
       await harness.controller.handlePowerEvent(PowerEvent.sleep);
 
       final events = await harness.activityLog.allEvents();
       expect(events.last.source, ActivitySource.systemSleep);
       expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
-      expect(harness.controller.quickEntry.state.isOpen, isFalse);
-      expect(harness.window.closedRoles, contains(WindowRole.quickEntry));
+      expect(harness.controller.activeRole, WindowRole.quickEntry);
+      expect(harness.controller.quickEntry.state.isOpen, isTrue);
+      expect(harness.controller.quickEntry.state.text, isEmpty);
+      expect(harness.window.closedRoles, isEmpty);
+      expect(harness.window.focusedRoles.last, WindowRole.quickEntry);
     });
+
+    test(
+      'submit immediately after system stop resumes interrupted task',
+      () async {
+        final harness = await _Harness.create();
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        await harness.controller.openQuickEntry();
+        await harness.controller.quickEntry.updateText('Write docs');
+        await harness.controller.quickEntry.submit();
+
+        await harness.controller.handlePowerEvent(PowerEvent.lock);
+        await harness.controller.quickEntry.submit();
+
+        final events = await harness.activityLog.allEvents();
+        expect(events.map((event) => event.eventType), [
+          ActivityEventType.startTask,
+          ActivityEventType.stopTask,
+          ActivityEventType.startTask,
+        ]);
+        expect(events[1].source, ActivitySource.systemLock);
+        expect(events.last.taskText, 'Write docs');
+        expect(harness.controller.snapshot!.activeTask?.taskText, 'Write docs');
+        expect(harness.tray.latestIconStatus, TrayIconStatus.tracking);
+      },
+    );
 
     test('external refresh applies latest icon status', () async {
       final harness = await _Harness.create();
@@ -541,20 +581,51 @@ void main() {
       expect(harness.tray.latestTooltip, 'No current task');
     });
 
-    test('power event while idle does not append a stop event', () async {
+    test(
+      'power event while idle does not append a stop event or prompt',
+      () async {
+        final harness = await _Harness.create();
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        harness.window.emitCloseRequest(WindowRole.quickEntry);
+        await Future<void>.delayed(Duration.zero);
+        harness.window.openedRoles.clear();
+        harness.window.focusedRoles.clear();
+
+        await harness.controller.handlePowerEvent(PowerEvent.lock);
+
+        expect(await harness.activityLog.allEvents(), isEmpty);
+        expect(harness.controller.activeRole, isNull);
+        expect(harness.controller.quickEntry.state.isOpen, isFalse);
+        expect(harness.window.openedRoles, isEmpty);
+        expect(harness.window.focusedRoles, isEmpty);
+        expect(
+          harness.tray.latestEntries
+              .singleWhere((entry) => entry.action == TrayMenuAction.stopTask)
+              .enabled,
+          isFalse,
+        );
+      },
+    );
+
+    test('duplicate power events do not append duplicate stops', () async {
       final harness = await _Harness.create();
       addTearDown(harness.dispose);
       await harness.controller.initialize();
+      await harness.controller.openQuickEntry();
+      await harness.controller.quickEntry.updateText('Write docs');
+      await harness.controller.quickEntry.submit();
 
       await harness.controller.handlePowerEvent(PowerEvent.lock);
+      await harness.controller.handlePowerEvent(PowerEvent.sleep);
 
-      expect(await harness.activityLog.allEvents(), isEmpty);
-      expect(
-        harness.tray.latestEntries
-            .singleWhere((entry) => entry.action == TrayMenuAction.stopTask)
-            .enabled,
-        isFalse,
-      );
+      final events = await harness.activityLog.allEvents();
+      expect(events.map((event) => event.eventType), [
+        ActivityEventType.startTask,
+        ActivityEventType.stopTask,
+      ]);
+      expect(events.last.source, ActivitySource.systemLock);
+      expect(harness.controller.quickEntry.state.isOpen, isTrue);
     });
 
     test('power event stream errors surface as runtime errors', () async {

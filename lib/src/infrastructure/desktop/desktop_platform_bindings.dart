@@ -1,9 +1,10 @@
 import 'dart:io';
 
 import '../../application/application.dart';
-import 'event_channel_power_event_adapter.dart';
+import 'desktop_screen_state_power_event_adapter.dart';
 import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
+import 'linux_dbus_power_event_adapter.dart';
 import 'method_channel_native_lifecycle_adapter.dart';
 import 'system_idle_user_idle_detector.dart';
 
@@ -27,6 +28,9 @@ final class DesktopPlatformBindings {
         (Platform.isLinux
             ? await GnomeIdleUserIdleDetector.create(logger: logger)
             : null);
+    final linuxPowerEventAdapter = Platform.isLinux
+        ? await LinuxDbusPowerEventAdapter.create(logger: logger)
+        : null;
     logger.debug(
       'idle detection capability: ${userIdleDetector != null ? 'supported' : 'unsupported'}',
     );
@@ -34,6 +38,9 @@ final class DesktopPlatformBindings {
       isLinux: Platform.isLinux,
       isMacOS: Platform.isMacOS,
       isWindows: Platform.isWindows,
+      linuxPowerEventAdapterFactory: linuxPowerEventAdapter == null
+          ? null
+          : () => linuxPowerEventAdapter,
       supportsUserIdleDetection: userIdleDetector != null,
       userIdleDetector: userIdleDetector ?? const UnsupportedUserIdleDetector(),
     );
@@ -46,6 +53,8 @@ final class DesktopPlatformBindings {
     StartupAtLoginAdapter Function()? linuxStartupAtLoginFactory,
     StartupAtLoginAdapter Function()? macOSStartupAtLoginFactory,
     StartupAtLoginAdapter Function()? windowsStartupAtLoginFactory,
+    PowerEventAdapter? Function()? linuxPowerEventAdapterFactory,
+    PowerEventAdapter? Function()? macOSPowerEventAdapterFactory,
     bool supportsUserIdleDetection = false,
     UserIdleDetector userIdleDetector = const UnsupportedUserIdleDetector(),
     bool? supportsTrayClickActions,
@@ -58,18 +67,23 @@ final class DesktopPlatformBindings {
       macOSStartupAtLoginFactory: macOSStartupAtLoginFactory,
       windowsStartupAtLoginFactory: windowsStartupAtLoginFactory,
     );
+    final powerEventAdapter = _powerEventAdapterForPlatform(
+      isLinux: isLinux,
+      isMacOS: isMacOS,
+      isWindows: isWindows,
+      linuxPowerEventAdapterFactory: linuxPowerEventAdapterFactory,
+      macOSPowerEventAdapterFactory: macOSPowerEventAdapterFactory,
+    );
     return DesktopPlatformBindings(
       capabilities: PlatformCapabilities(
         supportsUserIdleDetection: supportsUserIdleDetection,
         supportsStartAtLogin:
             startupAtLoginAdapter is! UnsupportedStartupAtLoginAdapter,
-        supportsPowerEvents: isMacOS,
+        supportsPowerEvents: powerEventAdapter is! UnsupportedPowerEventAdapter,
         supportsTrayClickActions: supportsTrayClickActions ?? isMacOS,
       ),
       startupAtLoginAdapter: startupAtLoginAdapter,
-      powerEventAdapter: isMacOS
-          ? const EventChannelPowerEventAdapter()
-          : const UnsupportedPowerEventAdapter(),
+      powerEventAdapter: powerEventAdapter,
       userIdleDetector: userIdleDetector,
       nativeLifecycleAdapter: isMacOS
           ? MethodChannelNativeLifecycleAdapter()
@@ -104,5 +118,40 @@ final class DesktopPlatformBindings {
           LaunchAtStartupStartupAtLoginAdapter();
     }
     return const UnsupportedStartupAtLoginAdapter();
+  }
+
+  static PowerEventAdapter _powerEventAdapterForPlatform({
+    required bool isLinux,
+    required bool isMacOS,
+    required bool isWindows,
+    PowerEventAdapter? Function()? linuxPowerEventAdapterFactory,
+    PowerEventAdapter? Function()? macOSPowerEventAdapterFactory,
+  }) {
+    if (isLinux) {
+      return _powerEventAdapterFromFactory(linuxPowerEventAdapterFactory);
+    }
+    if (isMacOS) {
+      return _powerEventAdapterFromFactory(
+        macOSPowerEventAdapterFactory ??
+            () => DesktopScreenStatePowerEventAdapter(),
+      );
+    }
+    if (isWindows) {
+      return const UnsupportedPowerEventAdapter();
+    }
+    return const UnsupportedPowerEventAdapter();
+  }
+
+  static PowerEventAdapter _powerEventAdapterFromFactory(
+    PowerEventAdapter? Function()? factory,
+  ) {
+    if (factory == null) {
+      return const UnsupportedPowerEventAdapter();
+    }
+    try {
+      return factory() ?? const UnsupportedPowerEventAdapter();
+    } catch (_) {
+      return const UnsupportedPowerEventAdapter();
+    }
   }
 }

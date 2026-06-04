@@ -86,15 +86,14 @@ later app launch with `Error waiting for a debug connection`.
 
 Platforms:
 
-- [x] Tested on Ubuntu, Mint and Fedora is in progress.
-- [x] MacOS
+- [x] Linux, with Ubuntu, Mint, and Fedora testing in progress.
+- [x] macOS
 - [ ] Windows
 
 Linux limitations:
 
 - Hovering over the tray icon does not show the current task.
 - Clicking tray icon launches menu as secondary click not supported.
-- Does not handle lock/sleep events (Mac is untested for this but the code exists).
 
 ### Fedora
 

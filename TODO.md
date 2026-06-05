@@ -4,7 +4,6 @@
 - [ ] Setup CI to run static analysis (standard Dart tools + AI reviews)
 - [ ] On Mac, sometime the windows appears on other desktops I think.
   It should always appear on the current desktop.
-- [ ] Enable suspend/resume on Linux
 - [ ] Get application working on Windows
 - [ ] Create build process that generates release and nightly binaries as zip
 - [ ] Expand build process to create deb package

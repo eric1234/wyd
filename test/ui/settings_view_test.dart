@@ -42,6 +42,28 @@ void main() {
     expect(startAtLogin.onChanged, isNull);
   });
 
+  testWidgets('does not overflow with high text scaling', (tester) async {
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    final configuration = WindowRoleConfiguration.forRole(WindowRole.settings);
+    await tester.binding.setSurfaceSize(
+      Size(configuration.width, configuration.height),
+    );
+    final controller = SettingsController(
+      client: _FakeSettingsClient(snapshot: _snapshot()),
+      onSaved: (_) async {},
+    );
+    await controller.open();
+
+    await tester.pumpWidget(
+      _scaledMaterialApp(home: SettingsView(controller: controller)),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Reminder interval'), findsOneWidget);
+  });
+
   testWidgets(
     'shows validation only after commit and autosaves valid changes',
     (tester) async {
@@ -119,6 +141,19 @@ Future<void> _pumpSettingsView(
       theme: buildWydTheme(),
       home: SettingsView(controller: controller),
     ),
+  );
+}
+
+Widget _scaledMaterialApp({required Widget home}) {
+  return MaterialApp(
+    theme: buildWydTheme(),
+    builder: (context, child) {
+      return MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(2)),
+        child: child ?? const SizedBox.shrink(),
+      );
+    },
+    home: home,
   );
 }
 

@@ -230,7 +230,7 @@ static void my_application_activate(GApplication* application) {
 
   // This app is tray-first, so its first visible window is usually the compact
   // quick-entry popup. Dart-side role configuration resizes report/settings.
-  gtk_window_set_default_size(window, 420, 304);
+  gtk_window_set_default_size(window, 560, 440);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

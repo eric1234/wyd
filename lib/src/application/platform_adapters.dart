@@ -46,8 +46,8 @@ final class WindowRoleConfiguration {
     this.alwaysOnTop = false,
   });
 
-  static const quickEntryWidth = 420.0;
-  static const quickEntryHeight = 360.0;
+  static const quickEntryWidth = 560.0;
+  static const quickEntryHeight = 440.0;
 
   factory WindowRoleConfiguration.quickEntry() {
     return const WindowRoleConfiguration(

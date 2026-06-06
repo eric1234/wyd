@@ -121,6 +121,64 @@ void main() {
     expect(find.text('Recent Tasks'), findsOneWidget);
   });
 
+  testWidgets('does not overflow with high text scaling', (tester) async {
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(
+      const Size(420, WindowRoleConfiguration.quickEntryHeight),
+    );
+    final controller = QuickEntryController(
+      client: _FakeQuickEntryClient(),
+      onSubmitted: (_) async {},
+    );
+    await controller.open(
+      _snapshot(
+        activeTask: _activeTask('Write docs'),
+        recentSuggestions: List.generate(
+          defaultAutocompleteSuggestionLimit,
+          (index) => _suggestion('Task $index'),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _scaledMaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Recent Tasks'), findsOneWidget);
+  });
+
+  testWidgets('stacks top controls when text scaling needs more width', (
+    tester,
+  ) async {
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.binding.setSurfaceSize(
+      const Size(
+        WindowRoleConfiguration.quickEntryWidth,
+        WindowRoleConfiguration.quickEntryHeight,
+      ),
+    );
+    final controller = QuickEntryController(
+      client: _FakeQuickEntryClient(),
+      onSubmitted: (_) async {},
+    );
+    await controller.open(_snapshot(activeTask: null));
+
+    await tester.pumpWidget(
+      _scaledMaterialApp(home: QuickEntryView(controller: controller)),
+    );
+    await tester.pump();
+
+    final textFieldRect = tester.getRect(find.byType(TextField));
+    final buttonRect = tester.getRect(find.byType(FilledButton));
+    expect(buttonRect.top, greaterThan(textFieldRect.bottom));
+  });
+
   testWidgets('pressing Enter submits raw task text from the field', (
     tester,
   ) async {
@@ -282,4 +340,16 @@ final class _FakeQuickEntryClient implements QuickEntryClient {
     submittedTexts.add(taskText);
     return _snapshot(activeTask: _activeTask(taskText));
   }
+}
+
+Widget _scaledMaterialApp({required Widget home}) {
+  return MaterialApp(
+    builder: (context, child) {
+      return MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(2)),
+        child: child ?? const SizedBox.shrink(),
+      );
+    },
+    home: home,
+  );
 }

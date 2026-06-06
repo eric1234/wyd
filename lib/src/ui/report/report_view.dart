@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../layout_metrics.dart';
 import 'report_controller.dart';
 
 class ReportView extends StatefulWidget {
@@ -42,12 +43,14 @@ class _ReportViewState extends State<ReportView> {
   Widget build(BuildContext context) {
     final report = _state.report;
     final selectedDate = _state.selectedDate;
+    final metrics = WydLayoutMetrics.of(context);
+    final sectionGap = metrics.space(0.75);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Report')),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: metrics.insetsAll(1),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -60,7 +63,7 @@ class _ReportViewState extends State<ReportView> {
                 onPrevious: widget.controller.previousDay,
                 onNext: widget.controller.nextDay,
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: sectionGap),
               if (_state.loading)
                 const Expanded(
                   child: Center(child: CircularProgressIndicator()),
@@ -83,7 +86,7 @@ class _ReportViewState extends State<ReportView> {
                 )
               else ...[
                 _TotalCard(duration: report.totalDuration),
-                const SizedBox(height: 12),
+                SizedBox(height: sectionGap),
                 Expanded(
                   child: Card(
                     margin: EdgeInsets.zero,
@@ -134,10 +137,12 @@ class _DateHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: metrics.insetsSymmetric(horizontal: 0.5, vertical: 0.25),
         child: Row(
           children: [
             IconButton(
@@ -171,10 +176,12 @@ class _TotalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: metrics.insetsAll(1),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -182,7 +189,7 @@ class _TotalCard extends StatelessWidget {
               'Tracked today',
               style: Theme.of(context).textTheme.labelLarge,
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: metrics.space(0.25)),
             Text(
               'Total: ${formatReportDuration(duration)}',
               style: Theme.of(context).textTheme.headlineSmall,
@@ -208,20 +215,21 @@ class _ReportStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final metrics = WydLayoutMetrics.of(context);
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
+        constraints: BoxConstraints(maxWidth: metrics.maxWidth(22.5, min: 360)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: colorScheme.secondary),
-            const SizedBox(height: 12),
+            Icon(icon, size: metrics.size(3), color: colorScheme.secondary),
+            SizedBox(height: metrics.space(0.75)),
             Text(
               title,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 4),
+            SizedBox(height: metrics.space(0.25)),
             Text(
               message,
               textAlign: TextAlign.center,

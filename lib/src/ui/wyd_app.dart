@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
 import '../application/application.dart';
+import 'layout_metrics.dart';
 import 'quick_entry/quick_entry.dart';
 import 'report/report.dart';
 import 'settings/settings.dart';
@@ -46,6 +48,7 @@ class WydChildWindowApp extends StatelessWidget {
     return MaterialApp(
       title: 'wyd',
       theme: buildWydTheme(),
+      builder: _buildWithScalingAdjustment,
       home: switch (role) {
         WindowRole.report =>
           reportController == null
@@ -85,6 +88,7 @@ class WydFatalStartupApp extends StatelessWidget {
     return MaterialApp(
       title: 'wyd',
       theme: buildWydTheme(),
+      builder: _buildWithScalingAdjustment,
       home: _StartupErrorPage(message: message, onExit: onExit),
     );
   }
@@ -125,6 +129,7 @@ class _WydAppState extends State<WydApp> {
     return MaterialApp(
       title: 'wyd',
       theme: buildWydTheme(),
+      builder: _buildWithScalingAdjustment,
       home: controller == null
           ? const WydHomePage()
           : WydRolePage(controller: controller),
@@ -138,31 +143,58 @@ class _WydAppState extends State<WydApp> {
   }
 }
 
+Widget _buildWithScalingAdjustment(BuildContext context, Widget? child) {
+  final content = child ?? const SizedBox.shrink();
+  final mediaQuery = MediaQuery.of(context);
+  final textScale = mediaQuery.textScaler.scale(1);
+  final adjustment = WydTextScaleAdjustment.resolve(
+    isLinux: Platform.isLinux,
+    environment: Platform.environment,
+    devicePixelRatio: mediaQuery.devicePixelRatio,
+    textScale: textScale,
+  );
+  final adjustedContent = adjustment.adjusted
+      ? MediaQuery(
+          data: mediaQuery.copyWith(
+            textScaler: TextScaler.linear(adjustment.adjustedTextScale),
+          ),
+          child: content,
+        )
+      : content;
+
+  return adjustedContent;
+}
+
 class WydHomePage extends StatelessWidget {
   const WydHomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final metrics = WydLayoutMetrics.of(context);
 
     return Scaffold(
       appBar: AppBar(title: const Text('wyd')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("What's ya doin?", style: textTheme.headlineMedium),
-                const SizedBox(height: 12),
-                const Text(
-                  'Domain core is ready. Tray, persistence, scheduling, and '
-                  'desktop windows will be layered on top in later milestones.',
-                ),
-              ],
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: metrics.insetsAll(1.5),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: metrics.maxWidth(32.5, min: 520),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("What's ya doin?", style: textTheme.headlineMedium),
+                  SizedBox(height: metrics.space(0.75)),
+                  const Text(
+                    'Domain core is ready. Tray, persistence, scheduling, and '
+                    'desktop windows will be layered on top in later milestones.',
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -238,12 +270,16 @@ class _PlaceholderRolePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Scaffold(
       appBar: AppBar(title: Text(title)),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(message, textAlign: TextAlign.center),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: metrics.insetsAll(1.5),
+            child: Text(message, textAlign: TextAlign.center),
+          ),
         ),
       ),
     );
@@ -258,32 +294,38 @@ class _StartupErrorPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('wyd startup error')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Unable to start tray app',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Text(message),
-                const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: onExit,
-                    child: const Text('Exit'),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: metrics.insetsAll(1.5),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: metrics.maxWidth(32.5, min: 520),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Unable to start tray app',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                ),
-              ],
+                  SizedBox(height: metrics.space(0.75)),
+                  Text(message),
+                  SizedBox(height: metrics.space(1.5)),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: onExit,
+                      child: const Text('Exit'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -300,32 +342,38 @@ class _RuntimeErrorPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('wyd error')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Operation failed',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Text(message),
-                const SizedBox(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: onDismiss,
-                    child: const Text('Dismiss'),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: metrics.insetsAll(1.5),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: metrics.maxWidth(32.5, min: 520),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Operation failed',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                ),
-              ],
+                  SizedBox(height: metrics.space(0.75)),
+                  Text(message),
+                  SizedBox(height: metrics.space(1.5)),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: onDismiss,
+                      child: const Text('Dismiss'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

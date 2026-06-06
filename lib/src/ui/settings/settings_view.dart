@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../domain/domain.dart';
+import '../layout_metrics.dart';
 import 'settings_controller.dart';
 
 class SettingsView extends StatefulWidget {
@@ -80,13 +81,19 @@ class _SettingsViewState extends State<SettingsView> {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+    final sectionGap = metrics.space(0.75);
+    final savingIndicatorHeight = metrics.size(0.25);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
         bottom: _state.saving
-            ? const PreferredSize(
-                preferredSize: Size.fromHeight(4),
-                child: LinearProgressIndicator(),
+            ? PreferredSize(
+                preferredSize: Size.fromHeight(savingIndicatorHeight),
+                child: LinearProgressIndicator(
+                  minHeight: savingIndicatorHeight,
+                ),
               )
             : null,
       ),
@@ -94,9 +101,11 @@ class _SettingsViewState extends State<SettingsView> {
           ? const Center(child: CircularProgressIndicator())
           : Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
+                constraints: BoxConstraints(
+                  maxWidth: metrics.maxWidth(35, min: 560),
+                ),
                 child: ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: metrics.insetsAll(1),
                   children: [
                     _SettingsSection(
                       title: 'Reminders',
@@ -109,7 +118,7 @@ class _SettingsViewState extends State<SettingsView> {
                           errorField: SettingsField.reminderIntervalMinutes,
                           onChanged: widget.controller.updateReminderInterval,
                         ),
-                        const SizedBox(height: 12),
+                        SizedBox(height: sectionGap),
                         _numberField(
                           controller: _responseTimeoutController,
                           focusNode: _responseTimeoutFocusNode,
@@ -120,7 +129,7 @@ class _SettingsViewState extends State<SettingsView> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: sectionGap),
                     _SettingsSection(
                       title: 'Suggestions',
                       children: [
@@ -135,7 +144,7 @@ class _SettingsViewState extends State<SettingsView> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: sectionGap),
                     _SettingsSection(
                       title: 'Activity',
                       children: [
@@ -155,7 +164,7 @@ class _SettingsViewState extends State<SettingsView> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: sectionGap),
                     _SettingsSection(
                       title: 'Startup',
                       children: [
@@ -278,15 +287,17 @@ class _SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: metrics.insetsAll(1),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 16),
+            SizedBox(height: metrics.space(1)),
             ...children,
           ],
         ),

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/domain/domain.dart';
 import 'package:wyd/src/ui/report/report.dart';
+import 'package:wyd/src/ui/wyd_app.dart';
 
 void main() {
   testWidgets('shows empty report state', (tester) async {
@@ -46,6 +47,42 @@ void main() {
       expect(find.text('Total: 1h 30m'), findsOneWidget);
       expect(find.text('Write docs'), findsOneWidget);
       expect(find.text('1h 30m'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('does not overflow with high text scaling', (tester) async {
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+    final configuration = WindowRoleConfiguration.forRole(WindowRole.report);
+    await tester.binding.setSurfaceSize(
+      Size(configuration.width, configuration.height),
+    );
+    final loader = _FakeReportLoader(
+      report: DailyReport(
+        localDate: DateTime(2026, 1, 2),
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        _scaledMaterialApp(home: ReportView(controller: controller)),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Total: 1h 30m'), findsOneWidget);
     } finally {
       await _disposeWidgetHarness(tester, controller);
     }
@@ -152,6 +189,19 @@ Future<void> _disposeWidgetHarness(
 ) async {
   await tester.pumpWidget(const SizedBox.shrink());
   controller.dispose();
+}
+
+Widget _scaledMaterialApp({required Widget home}) {
+  return MaterialApp(
+    theme: buildWydTheme(),
+    builder: (context, child) {
+      return MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(2)),
+        child: child ?? const SizedBox.shrink(),
+      );
+    },
+    home: home,
+  );
 }
 
 final class _FakeReportLoader implements DailyReportLoader {

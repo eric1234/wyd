@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../domain/domain.dart';
+import '../layout_metrics.dart';
 import 'quick_entry_controller.dart';
 
-const _suggestionRowHeight = 36.0;
-const _suggestionListMaxHeight =
-    defaultAutocompleteSuggestionLimit * _suggestionRowHeight;
+const _quickEntryPanelMaxWidthRem = 35.0;
+const _quickEntryControlsMinFieldWidthRem = 14.0;
+const _suggestionRowMinHeightRem = 2.25;
 
 class QuickEntryView extends StatelessWidget {
   const QuickEntryView({super.key, required this.controller});
@@ -15,12 +16,14 @@ class QuickEntryView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+
     return Scaffold(
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: metrics.insetsAll(0.75),
             child: Card(
               margin: EdgeInsets.zero,
               child: QuickEntryPanel(controller: controller),
@@ -80,6 +83,15 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
   Widget build(BuildContext context) {
     final suggestions = _state.suggestions;
     final colorScheme = Theme.of(context).colorScheme;
+    final metrics = WydLayoutMetrics.of(context);
+    final sectionGap = metrics.space(0.75);
+    final suggestionLabelGap = metrics.space(0.375);
+    final suggestionRowMinHeight = metrics.atLeast(
+      36,
+      _suggestionRowMinHeightRem,
+    );
+    final suggestionListMaxHeight =
+        defaultAutocompleteSuggestionLimit * suggestionRowMinHeight;
 
     return Shortcuts(
       shortcuts: const {
@@ -105,59 +117,33 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
               ),
         },
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: BoxConstraints(
+            maxWidth: metrics.maxWidth(_quickEntryPanelMaxWidthRem, min: 420),
+          ),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: metrics.insetsAll(0.75),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  crossAxisAlignment: _state.validationMessage == null
-                      ? CrossAxisAlignment.center
-                      : CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _textController,
-                        focusNode: _focusNode,
-                        autofocus: true,
-                        textInputAction: TextInputAction.done,
-                        decoration: InputDecoration(
-                          labelText: "What's ya doin?",
-                          errorText: _state.validationMessage,
-                        ),
-                        onChanged: widget.controller.updateText,
-                        onSubmitted: (_) => widget.controller.submit(),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(96, 48),
-                      ),
-                      onPressed: _state.busy ? null : widget.controller.submit,
-                      child: Text(_state.busy ? 'Submitting...' : 'Submit'),
-                    ),
-                  ],
-                ),
+                _buildTaskControls(context, metrics),
                 if (suggestions.isNotEmpty) ...[
-                  const SizedBox(height: 12),
+                  SizedBox(height: sectionGap),
                   Text(
                     'Recent Tasks',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  SizedBox(height: suggestionLabelGap),
                   Flexible(
                     child: Material(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(metrics.size(0.5)),
                       clipBehavior: Clip.antiAlias,
                       color: colorScheme.surfaceContainer,
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxHeight: _suggestionListMaxHeight,
+                        constraints: BoxConstraints(
+                          maxHeight: suggestionListMaxHeight,
                         ),
                         child: ListView.builder(
                           padding: EdgeInsets.zero,
@@ -173,10 +159,13 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
                                 submitNow: true,
                               ),
                               child: Container(
-                                height: _suggestionRowHeight,
                                 alignment: Alignment.centerLeft,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
+                                constraints: BoxConstraints(
+                                  minHeight: suggestionRowMinHeight,
+                                ),
+                                padding: metrics.insetsSymmetric(
+                                  horizontal: 0.75,
+                                  vertical: 0.25,
                                 ),
                                 color: highlighted
                                     ? colorScheme.secondaryContainer
@@ -199,6 +188,62 @@ class _QuickEntryPanelState extends State<QuickEntryPanel> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTaskControls(BuildContext context, WydLayoutMetrics metrics) {
+    final controlGap = metrics.space(0.75);
+    final buttonMinimumSize = Size(
+      metrics.atLeast(96, 6),
+      metrics.atLeast(48, 3),
+    );
+    final submitButton = FilledButton(
+      style: FilledButton.styleFrom(minimumSize: buttonMinimumSize),
+      onPressed: _state.busy ? null : widget.controller.submit,
+      child: Text(_state.busy ? 'Submitting...' : 'Submit'),
+    );
+    final textField = TextField(
+      controller: _textController,
+      focusNode: _focusNode,
+      autofocus: true,
+      textInputAction: TextInputAction.done,
+      decoration: InputDecoration(
+        labelText: "What's ya doin?",
+        errorText: _state.validationMessage,
+      ),
+      onChanged: widget.controller.updateText,
+      onSubmitted: (_) => widget.controller.submit(),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minimumInlineWidth =
+            metrics.size(_quickEntryControlsMinFieldWidthRem) +
+            controlGap +
+            buttonMinimumSize.width;
+        final shouldStack = constraints.maxWidth < minimumInlineWidth;
+        if (shouldStack) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              textField,
+              SizedBox(height: controlGap),
+              Align(alignment: Alignment.centerRight, child: submitButton),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: _state.validationMessage == null
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            Expanded(child: textField),
+            SizedBox(width: controlGap),
+            submitButton,
+          ],
+        );
+      },
     );
   }
 

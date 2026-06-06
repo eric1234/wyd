@@ -1,4 +1,6 @@
 - [ ] Test suspend/resume on Mac
+- [ ] Verify app works well on openSuse Tumbleweed (KDE/Wayland)
+- [ ] Verify app works well on Xubuntu (Xfce/X11)
 - [ ] Setup repo to follow best practices (PRs, protected branches, etc)
 - [ ] Setup CI to run unit/integrated tests for supported platforms on every push
 - [ ] Setup CI to run static analysis (standard Dart tools + AI reviews)

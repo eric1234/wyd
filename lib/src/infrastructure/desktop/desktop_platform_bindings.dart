@@ -6,6 +6,7 @@ import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'linux_dbus_power_event_adapter.dart';
 import 'method_channel_native_lifecycle_adapter.dart';
+import 'screen_saver_idle_user_idle_detector.dart';
 import 'system_idle_user_idle_detector.dart';
 
 final class DesktopPlatformBindings {
@@ -23,17 +24,32 @@ final class DesktopPlatformBindings {
     final systemIdleDetector = await SystemIdleUserIdleDetector.create(
       logger: logger,
     );
-    final userIdleDetector =
-        systemIdleDetector ??
-        (Platform.isLinux
-            ? await GnomeIdleUserIdleDetector.create(logger: logger)
-            : null);
+    UserIdleDetector? userIdleDetector = systemIdleDetector;
+    var idleBackend = userIdleDetector != null ? 'system_idle' : 'unsupported';
+
+    if (userIdleDetector == null && Platform.isLinux) {
+      final screenSaverIdleDetector =
+          await ScreenSaverIdleUserIdleDetector.create(logger: logger);
+      if (screenSaverIdleDetector != null) {
+        userIdleDetector = screenSaverIdleDetector;
+        idleBackend = 'screensaver dbus';
+      }
+    }
+
+    if (userIdleDetector == null && Platform.isLinux) {
+      final gnomeIdleDetector = await GnomeIdleUserIdleDetector.create(
+        logger: logger,
+      );
+      if (gnomeIdleDetector != null) {
+        userIdleDetector = gnomeIdleDetector;
+        idleBackend = 'gnome mutter';
+      }
+    }
+
     final linuxPowerEventAdapter = Platform.isLinux
         ? await LinuxDbusPowerEventAdapter.create(logger: logger)
         : null;
-    logger.debug(
-      'idle detection capability: ${userIdleDetector != null ? 'supported' : 'unsupported'}',
-    );
+    logger.debug('idle detection backend selected: $idleBackend');
     return DesktopPlatformBindings.forPlatform(
       isLinux: Platform.isLinux,
       isMacOS: Platform.isMacOS,

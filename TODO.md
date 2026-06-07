@@ -1,5 +1,7 @@
+- [ ] Verify suspend resume on all supported Linux platforms
+- [ ] Verify lock/unlock on all supported Linux platforms
 - [ ] Test suspend/resume on Mac
-- [ ] Verify app works well on openSuse Tumbleweed (KDE/Wayland)
+- [ ] Test lock/unlock on Mac
 - [ ] Verify app works well on Xubuntu (Xfce/X11)
 - [ ] Setup repo to follow best practices (PRs, protected branches, etc)
 - [ ] Setup CI to run unit/integrated tests for supported platforms on every push

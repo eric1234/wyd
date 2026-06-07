@@ -11,7 +11,7 @@ Electron-based version of the same idea that built about a decade earlier. This
 implementation moves the app to Flutter because Electron proved too bulky and
 awkward for a small utility that is meant to live quietly in the system tray.
 
-## Getting Started
+## Development
 
 1. Install the Flutter SDK from the official Flutter installation guide for
    your platform.
@@ -56,7 +56,7 @@ awkward for a small utility that is meant to live quietly in the system tray.
 
 The built apps will be placed under `build/linux/` and `build/macos/`.
 
-## Useful Commands
+### Useful Commands
 
 ```bash
 flutter analyze
@@ -64,7 +64,7 @@ dart format .
 flutter test
 ```
 
-## Integration Tests
+### Integration Tests
 
 Run integration tests through the project script instead of invoking the
 `integration_test` directory directly:
@@ -86,7 +86,7 @@ later app launch with `Error waiting for a debug connection`.
 
 Platforms:
 
-- [x] Linux, with Ubuntu, Mint, and Fedora testing in progress.
+- [x] Linux, with Ubuntu, Mint, Fedora and openSUSE testing in progress.
 - [x] macOS
 - [ ] Windows
 
@@ -108,6 +108,16 @@ Finally enable the extension.
 
 ```bash
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+```
+
+### openSUSE
+
+Because openSUSE is a KDE-based distro it likely does not have the
+libayatana-appindicator package this application uses to register the tray
+interaction. To install run:
+
+```bash
+sudo zypper install libayatana-appindicator3-1
 ```
 
 ## License

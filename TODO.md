@@ -1,13 +1,15 @@
-- [ ] Verify suspend resume on all supported Linux platforms
-- [ ] Verify lock/unlock on all supported Linux platforms
+- [ ] Verify suspend resume on Xubuntu platforms
+- [ ] Verify lock/unlock on Xubuntu platforms
+- [ ] Verify launch at login works well on Xubuntu
 - [ ] Test suspend/resume on Mac
 - [ ] Test lock/unlock on Mac
-- [ ] Verify app works well on Xubuntu (Xfce/X11)
 - [ ] Setup repo to follow best practices (PRs, protected branches, etc)
 - [ ] Setup CI to run unit/integrated tests for supported platforms on every push
 - [ ] Setup CI to run static analysis (standard Dart tools + AI reviews)
 - [ ] On Mac, sometime the windows appears on other desktops I think.
   It should always appear on the current desktop.
+- [ ] The tray icon could use some refinement. On some platforms it is too small
+  on others it is too thin, on others it has too much border.
 - [ ] Get application working on Windows
 - [ ] Create build process that generates release and nightly binaries as zip
 - [ ] Expand build process to create deb package

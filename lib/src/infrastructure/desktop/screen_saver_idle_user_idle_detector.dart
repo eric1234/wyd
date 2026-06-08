@@ -128,13 +128,27 @@ final class ScreenSaverIdleUserIdleDetector implements UserIdleDetector {
         logger: logger,
       );
     } catch (error, stackTrace) {
-      logger.error(
-        'ScreenSaver idle detector probe failed for $sourceLabel',
-        error,
-        stackTrace,
-      );
+      if (_isUnavailableDbusProbeError(error)) {
+        logger.debug(
+          'ScreenSaver idle detector probe unavailable for $sourceLabel: $error',
+        );
+      } else {
+        logger.error(
+          'ScreenSaver idle detector probe failed for $sourceLabel',
+          error,
+          stackTrace,
+        );
+      }
       return null;
     }
+  }
+
+  static bool _isUnavailableDbusProbeError(Object error) {
+    return error is DBusServiceUnknownException ||
+        error is DBusUnknownObjectException ||
+        error is DBusUnknownInterfaceException ||
+        error is DBusUnknownMethodException ||
+        error is DBusNotSupportedException;
   }
 
   @override

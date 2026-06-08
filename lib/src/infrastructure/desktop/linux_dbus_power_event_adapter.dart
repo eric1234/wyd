@@ -213,11 +213,17 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
           return source;
         }
       } catch (error, stackTrace) {
-        logger.error(
-          'Linux power event source probe failed for ${source.label}',
-          error,
-          stackTrace,
-        );
+        if (_isUnavailableDbusProbeError(error)) {
+          logger.debug(
+            'Linux power event source unavailable for ${source.label}: $error',
+          );
+        } else {
+          logger.error(
+            'Linux power event source probe failed for ${source.label}',
+            error,
+            stackTrace,
+          );
+        }
       }
       return null;
     });
@@ -301,6 +307,12 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
     );
     final introspection = await object.introspect();
     return introspectionContainsSignal(introspection, source);
+  }
+
+  static bool _isUnavailableDbusProbeError(Object error) {
+    return error is DBusServiceUnknownException ||
+        error is DBusUnknownObjectException ||
+        error is DBusUnknownInterfaceException;
   }
 
   static Stream<List<DBusValue>> _signalValuesForSource(

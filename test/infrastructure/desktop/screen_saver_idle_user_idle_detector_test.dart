@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dbus/dbus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/infrastructure/desktop/desktop.dart';
 
 void main() {
@@ -20,6 +21,44 @@ void main() {
       );
 
       expect(detector, isNull);
+    });
+
+    test('logs unsupported D-Bus idle probes without error noise', () async {
+      final logger = _CapturingDiagnosticLogger();
+
+      final detector = await ScreenSaverIdleUserIdleDetector.create(
+        getIdleDuration: () async => throw DBusNotSupportedException(
+          DBusMethodErrorResponse(
+            'org.freedesktop.DBus.Error.NotSupported',
+            const [DBusString('method is not supported')],
+          ),
+        ),
+        logger: logger,
+      );
+
+      expect(detector, isNull);
+      expect(logger.errors, isEmpty);
+      expect(logger.debugMessages, hasLength(1));
+      expect(logger.debugMessages.single, contains('unavailable'));
+      expect(logger.debugMessages.single, contains('injected reader'));
+    });
+
+    test('logs unexpected idle probe failures as errors', () async {
+      final logger = _CapturingDiagnosticLogger();
+
+      final detector = await ScreenSaverIdleUserIdleDetector.create(
+        getIdleDuration: () async => throw StateError('probe failed'),
+        logger: logger,
+      );
+
+      expect(detector, isNull);
+      expect(logger.debugMessages, isEmpty);
+      expect(logger.errors, hasLength(1));
+      expect(
+        logger.errors.single.message,
+        'ScreenSaver idle detector probe failed for injected reader',
+      );
+      expect(logger.errors.single.error, isA<StateError>());
     });
 
     test('defers by remaining idle duration', () async {
@@ -153,4 +192,27 @@ void main() {
       ]);
     });
   });
+}
+
+final class _CapturingDiagnosticLogger implements DiagnosticLogger {
+  final debugMessages = <String>[];
+  final errors = <_LoggedError>[];
+
+  @override
+  void debug(String message) {
+    debugMessages.add(message);
+  }
+
+  @override
+  void error(String message, Object error, StackTrace stackTrace) {
+    errors.add(_LoggedError(message, error, stackTrace));
+  }
+}
+
+final class _LoggedError {
+  const _LoggedError(this.message, this.error, this.stackTrace);
+
+  final String message;
+  final Object error;
+  final StackTrace stackTrace;
 }

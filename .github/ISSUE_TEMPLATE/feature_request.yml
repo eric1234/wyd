@@ -1,0 +1,95 @@
+name: Feature Request
+description: Suggest a focused improvement for wyd.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. `wyd` is intended to stay small: a local-first Flutter desktop tray utility for Linux and macOS, with no accounts, cloud sync, telemetry, or full time-tracking platform scope.
+
+        Windows runner files may exist from the Flutter template, but Windows is not currently a supported runtime target.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What user problem would this solve? Describe the workflow rather than only the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should wyd do differently?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-platforms
+    attributes:
+      label: Affected platforms
+      description: Choose the platforms where this feature matters.
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Cross-platform Linux and macOS
+        - Development workflow only
+        - Documentation only
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Tray or menu-bar interaction
+        - Task prompt / quick entry
+        - Reports / timeline
+        - Settings
+        - Startup / launch on login
+        - Idle detection
+        - Suspend / resume handling
+        - Persistence / SQLite data
+        - Multi-window behavior
+        - Build / packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Local-first and privacy impact
+      description: Describe any effect on local data, task history, settings, startup behavior, background activity, exports, or user privacy.
+      placeholder: "No new data leaves the device; stores only local settings; changes startup behavior; etc."
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or smaller alternatives have you considered?
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: What would make this feature complete and useful?
+      placeholder: |
+        - ...
+        - ...
+
+  - type: checkboxes
+    id: scope-check
+    attributes:
+      label: Scope check
+      options:
+        - label: This request keeps wyd focused on local-first desktop time tracking.
+          required: true
+        - label: This request does not require accounts, cloud sync, telemetry, or a remote service.
+          required: true

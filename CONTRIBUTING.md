@@ -52,6 +52,15 @@ behavior, startup behavior, or anything that affects user privacy.
    flutter run -d macos
    ```
 
+6. Build a release binary:
+
+   ```bash
+   flutter build linux --release
+   flutter build macos --release
+   ```
+
+   The built apps will be placed under `build/linux/` and `build/macos/`.
+
 ## Project Structure
 
 - `lib/main.dart` boots the resident tray app and child report/settings windows.
@@ -105,7 +114,8 @@ Run integration tests through the project script, not by targeting the whole
 ```
 
 The script runs each `integration_test/*_test.dart` file in a separate Flutter
-process to avoid desktop debug-connection issues.
+process to avoid desktop debug-connection issues. Pass the Flutter device ID as
+the first argument, such as `linux` or `macos`.
 
 Add or update targeted tests for behavior changes. Platform tray behavior,
 startup behavior, idle detection, and window-management changes may also need a

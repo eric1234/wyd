@@ -1,0 +1,140 @@
+name: Bug Report
+description: Report a reproducible problem with wyd.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. `wyd` is a local-first desktop tray app for Linux and macOS, and runtime environment details are especially helpful for tray, startup, idle-detection, and window-management issues.
+
+        Do not attach real task-history databases, private task names, secrets, or unsanitized logs. For suspected vulnerabilities, use GitHub private vulnerability reporting instead of a public issue.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I have removed private task names, local paths, secrets, and other sensitive data from this report.
+          required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Choose the main area affected by the bug.
+      multiple: true
+      options:
+        - Tray or menu-bar interaction
+        - Task prompt / quick entry
+        - Reports / timeline
+        - Settings
+        - Startup / launch on login
+        - Idle detection
+        - Suspend / resume handling
+        - Persistence / SQLite data
+        - Multi-window behavior
+        - Build / development setup
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: wyd version or commit
+      description: Provide the release version, branch, commit SHA, or note if this is a local source checkout.
+      placeholder: "v1.0.0, main at abc1234, or local checkout"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: How are you running wyd?
+      options:
+        - Built from source with Flutter
+        - Downloaded release build
+        - Packaged by a distro or third party
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: runtime-environment
+    attributes:
+      label: Runtime environment
+      description: Include the platform details that apply. Linux distro, desktop environment/window manager, display server, and tray/AppIndicator setup are especially important.
+      value: |
+        - OS and version:
+        - CPU architecture:
+        - Linux distro and version, if applicable:
+        - Linux desktop environment or window manager, if applicable:
+        - Linux display server/session type (X11 or Wayland), if applicable:
+        - Linux tray/AppIndicator setup or shell extension status, if applicable:
+        - Linux packages related to tray or idle detection, if known (`libayatana-appindicator`, `libxcb-screensaver0`, etc.):
+        - macOS hardware, if applicable (Intel or Apple Silicon):
+        - Flutter/Dart version, if running from source (`flutter --version`):
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start from a clean launch when possible.
+      placeholder: |
+        1. Start wyd with ...
+        2. Click ...
+        3. Wait for ...
+        4. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Frequency
+      options:
+        - Always
+        - Often
+        - Sometimes
+        - Once
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or recordings
+      description: Paste sanitized logs or add screenshots/recordings if useful. Remove task names, local paths, and personal data first.
+      placeholder: "Paste sanitized output here, or drag in screenshots/recordings."
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Note any workaround you found, such as installing a tray extension, switching sessions, or restarting the app.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add anything else that may help diagnose the issue.

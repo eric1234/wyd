@@ -79,6 +79,15 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
       signalKind: LinuxDbusPowerSignalKind.activeChanged,
     ),
     LinuxDbusPowerEventSource(
+      label: 'Xfce screensaver lock',
+      bus: LinuxDbusBus.session,
+      serviceName: 'org.xfce.ScreenSaver',
+      objectPath: DBusObjectPath.unchecked('/org/xfce/ScreenSaver'),
+      interfaceName: 'org.xfce.ScreenSaver',
+      signalName: 'ActiveChanged',
+      signalKind: LinuxDbusPowerSignalKind.activeChanged,
+    ),
+    LinuxDbusPowerEventSource(
       label: 'freedesktop screensaver lock (/ScreenSaver)',
       bus: LinuxDbusBus.session,
       serviceName: 'org.freedesktop.ScreenSaver',

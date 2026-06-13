@@ -41,29 +41,35 @@ void main() {
       );
     });
 
-    test('defines GNOME, Cinnamon, freedesktop, and KDE lock sources', () {
-      final sources = LinuxDbusPowerEventAdapter.knownSources;
+    test(
+      'defines GNOME, Cinnamon, Xfce, freedesktop, and KDE lock sources',
+      () {
+        final sources = LinuxDbusPowerEventAdapter.knownSources;
 
-      expect(
-        sources.map((source) => source.serviceName),
-        containsAll([
-          'org.cinnamon.ScreenSaver',
-          'org.gnome.ScreenSaver',
-          'org.freedesktop.ScreenSaver',
-          'org.kde.screensaver',
-        ]),
-      );
-      expect(
-        sources.where(
-          (source) => source.serviceName == 'org.freedesktop.ScreenSaver',
-        ),
-        hasLength(2),
-      );
-      expect(
-        sources.where((source) => source.serviceName == 'org.kde.screensaver'),
-        hasLength(2),
-      );
-    });
+        expect(
+          sources.map((source) => source.serviceName),
+          containsAll([
+            'org.cinnamon.ScreenSaver',
+            'org.gnome.ScreenSaver',
+            'org.xfce.ScreenSaver',
+            'org.freedesktop.ScreenSaver',
+            'org.kde.screensaver',
+          ]),
+        );
+        expect(
+          sources.where(
+            (source) => source.serviceName == 'org.freedesktop.ScreenSaver',
+          ),
+          hasLength(2),
+        );
+        expect(
+          sources.where(
+            (source) => source.serviceName == 'org.kde.screensaver',
+          ),
+          hasLength(2),
+        );
+      },
+    );
 
     test('probes source definitions independently', () async {
       final probedLabels = <String>[];

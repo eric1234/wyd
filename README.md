@@ -86,7 +86,7 @@ later app launch with `Error waiting for a debug connection`.
 
 Platforms:
 
-- [x] Linux, with Ubuntu, Mint, Fedora and openSUSE testing in progress.
+- [x] Linux, with Ubuntu, Mint, Fedora, openSUSE and Xubuntu
 - [x] macOS
 - [ ] Windows
 
@@ -118,6 +118,16 @@ interaction. To install run:
 
 ```bash
 sudo zypper install libayatana-appindicator3-1
+```
+
+### Xubuntu
+
+Xubuntu does not install the library used for idle detection by default. The
+app will still work but idle detection will be disabled. To enable it install
+the necessary library:
+
+```bash
+sudo apt install libxcb-screensaver0
 ```
 
 ## License

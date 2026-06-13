@@ -1,6 +1,3 @@
-- [ ] Verify suspend resume on Xubuntu platforms
-- [ ] Verify lock/unlock on Xubuntu platforms
-- [ ] Verify launch at login works well on Xubuntu
 - [ ] Test suspend/resume on Mac
 - [ ] Test lock/unlock on Mac
 - [ ] Setup repo to follow best practices (PRs, protected branches, etc)

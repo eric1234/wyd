@@ -1,8 +1,5 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Security vulnerability
-    url: https://github.com/eric1234/wyd/security/policy
-    about: Please report suspected vulnerabilities privately instead of opening a public issue.
   - name: Contribution guide
     url: https://github.com/eric1234/wyd/blob/main/CONTRIBUTING.md
     about: Read project scope, setup, testing, and contribution expectations.

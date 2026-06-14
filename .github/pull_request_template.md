@@ -8,13 +8,7 @@
 
 ## Testing
 
-<!-- List commands and manual checks run. Explain any checks that were not run. -->
-
-- [ ] `dart format .`
-- [ ] `flutter analyze`
-- [ ] `flutter test`
-- [ ] Relevant integration test script: `./tool/run_integration_tests.sh linux` or `./tool/run_integration_tests.sh macos`
-- [ ] Manual desktop smoke test, if tray, startup, idle detection, or window behavior changed
+<!-- CI runs automated checks but describe any manual testing you did -->
 
 ## Platform Impact
 
@@ -22,7 +16,6 @@
 
 - [ ] Linux behavior considered
 - [ ] macOS behavior considered
-- [ ] Windows is not treated as a supported runtime target
 
 ## Screenshots or Recordings
 
@@ -41,5 +34,3 @@
 
 - [ ] The change preserves `wyd` as a small, local-first tray/menu-bar utility.
 - [ ] Relevant tests were added or updated, or the reason they are not needed is explained.
-- [ ] Platform-specific behavior goes through existing adapter boundaries where practical.
-- [ ] Activity-log and persistence changes preserve append-only task-history semantics.

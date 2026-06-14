@@ -8,13 +8,7 @@
 
 ## Testing
 
-<!-- CI runs formatting, analysis, unit tests, and Linux/macOS integration tests on every PR.
-List extra local or manual checks run, and explain behavior CI cannot cover. -->
-
-Manual checks:
-
-<!-- For tray, startup, idle detection, or window behavior changes, include a
-manual desktop smoke test or explain why one was not needed. -->
+<!-- CI runs automated checks but describe any manual testing you did -->
 
 ## Platform Impact
 
@@ -22,7 +16,6 @@ manual desktop smoke test or explain why one was not needed. -->
 
 - [ ] Linux behavior considered
 - [ ] macOS behavior considered
-- [ ] Windows is not treated as a supported runtime target
 
 ## Screenshots or Recordings
 
@@ -41,5 +34,3 @@ manual desktop smoke test or explain why one was not needed. -->
 
 - [ ] The change preserves `wyd` as a small, local-first tray/menu-bar utility.
 - [ ] Relevant tests were added or updated, or the reason they are not needed is explained.
-- [ ] Platform-specific behavior goes through existing adapter boundaries where practical.
-- [ ] Activity-log and persistence changes preserve append-only task-history semantics.

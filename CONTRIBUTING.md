@@ -121,6 +121,26 @@ Add or update targeted tests for behavior changes. Platform tray behavior,
 startup behavior, idle detection, and window-management changes may also need a
 manual desktop smoke test on the affected platform.
 
+### Testing GitHub Actions changes locally
+
+When changing `.github/workflows/`, smoke-test the Linux CI matrix leg with
+[`act`](https://github.com/nektos/act) when possible:
+
+```bash
+mkdir -p /tmp/act-artifacts
+flutter clean
+act pull_request -j ci --matrix platform:linux \
+  --artifact-server-path /tmp/act-artifacts
+```
+
+The first time you run this it will ask what image to use. The "medium" one
+is sufficient.
+
+`act` is only a local Linux smoke test. It does not validate the hosted
+`macos-latest` runner, so macOS CI changes still need to be verified by a real
+GitHub Actions run. Avoid `act --reuse` when validating Linux apt/package
+changes because previously installed packages can hide missing dependencies.
+
 ## Pull Request Checklist
 
 Before opening a pull request, verify that:

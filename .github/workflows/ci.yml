@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.41.7
+
+jobs:
+  ci:
+    name: CI (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            desktop: linux
+            coverage: true
+          - platform: macos
+            os: macos-latest
+            desktop: macos
+            coverage: false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            cmake \
+            lcov \
+            libayatana-appindicator3-dev \
+            libxcb-screensaver0-dev \
+            lld-18 \
+            llvm-18 \
+            ninja-build \
+            xvfb
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Enable desktop support
+        run: flutter config --enable-${{ matrix.desktop }}-desktop
+
+      - name: Install Dart and Flutter dependencies
+        run: flutter pub get
+
+      - name: Check Dart formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze Flutter project
+        run: flutter analyze
+
+      - name: Run Flutter tests with coverage
+        if: matrix.coverage
+        run: flutter test --coverage
+
+      - name: Run Flutter tests
+        if: ${{ !matrix.coverage }}
+        run: flutter test
+
+      - name: Generate HTML coverage report
+        if: matrix.coverage
+        run: genhtml coverage/lcov.info --output-directory coverage/html
+
+      - name: Add coverage summary
+        if: matrix.coverage
+        run: |
+          {
+            echo '## Coverage'
+            echo
+            echo '```text'
+            lcov --summary coverage/lcov.info
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Linux coverage artifact
+        if: matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-linux
+          path: |
+            coverage/lcov.info
+            coverage/html/
+          if-no-files-found: error
+
+      - name: Run Linux integration tests
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a dbus-run-session -- ./tool/run_integration_tests.sh linux
+
+      - name: Run macOS integration tests
+        if: matrix.platform == 'macos'
+        run: ./tool/run_integration_tests.sh macos

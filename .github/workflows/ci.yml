@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  push:
   pull_request:
   workflow_dispatch:
 
@@ -71,15 +70,15 @@ jobs:
         run: dart format --output=none --set-exit-if-changed .
 
       - name: Analyze Flutter project
-        run: flutter analyze --no-pub
+        run: flutter analyze
 
       - name: Run Flutter tests with coverage
         if: matrix.coverage
-        run: flutter test --coverage --no-pub
+        run: flutter test --coverage
 
       - name: Run Flutter tests
         if: ${{ !matrix.coverage }}
-        run: flutter test --no-pub
+        run: flutter test
 
       - name: Generate HTML coverage report
         if: matrix.coverage
@@ -108,8 +107,8 @@ jobs:
 
       - name: Run Linux integration tests
         if: matrix.platform == 'linux'
-        run: xvfb-run -a dbus-run-session -- ./tool/run_integration_tests.sh linux --no-pub
+        run: xvfb-run -a dbus-run-session -- ./tool/run_integration_tests.sh linux
 
       - name: Run macOS integration tests
         if: matrix.platform == 'macos'
-        run: ./tool/run_integration_tests.sh macos --no-pub
+        run: ./tool/run_integration_tests.sh macos

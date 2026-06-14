@@ -8,13 +8,13 @@
 
 ## Testing
 
-<!-- List commands and manual checks run. Explain any checks that were not run. -->
+<!-- CI runs formatting, analysis, unit tests, and Linux/macOS integration tests on every PR.
+List extra local or manual checks run, and explain behavior CI cannot cover. -->
 
-- [ ] `dart format .`
-- [ ] `flutter analyze`
-- [ ] `flutter test`
-- [ ] Relevant integration test script: `./tool/run_integration_tests.sh linux` or `./tool/run_integration_tests.sh macos`
-- [ ] Manual desktop smoke test, if tray, startup, idle detection, or window behavior changed
+Manual checks:
+
+<!-- For tray, startup, idle detection, or window behavior changes, include a
+manual desktop smoke test or explain why one was not needed. -->
 
 ## Platform Impact
 

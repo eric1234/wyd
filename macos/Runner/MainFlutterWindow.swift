@@ -2,6 +2,7 @@ import Cocoa
 import desktop_multi_window
 import FlutterMacOS
 import screen_retriever_macos
+import system_idle_macos
 import window_manager
 
 class MainFlutterWindow: NSWindow {
@@ -21,6 +22,7 @@ class MainFlutterWindow: NSWindow {
       // menu events from the controller that handles Report/Settings/Exit.
       FlutterMultiWindowPlugin.register(with: controller.registrar(forPlugin: "FlutterMultiWindowPlugin"))
       ScreenRetrieverMacosPlugin.register(with: controller.registrar(forPlugin: "ScreenRetrieverMacosPlugin"))
+      SystemIdlePlugin.register(with: controller.registrar(forPlugin: "SystemIdlePlugin"))
       WindowManagerPlugin.register(with: controller.registrar(forPlugin: "WindowManagerPlugin"))
       appDelegate?.configureLaunchAtStartupChannel(for: controller)
     }

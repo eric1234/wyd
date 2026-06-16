@@ -1,6 +1,8 @@
 PODS:
   - desktop_multi_window (0.0.1):
     - FlutterMacOS
+  - desktop_screenstate (0.0.1):
+    - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - screen_retriever_macos (0.0.1):
     - FlutterMacOS
@@ -13,6 +15,7 @@ PODS:
 
 DEPENDENCIES:
   - desktop_multi_window (from `Flutter/ephemeral/.symlinks/plugins/desktop_multi_window/macos`)
+  - desktop_screenstate (from `Flutter/ephemeral/.symlinks/plugins/desktop_screenstate/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - screen_retriever_macos (from `Flutter/ephemeral/.symlinks/plugins/screen_retriever_macos/macos`)
   - system_idle_macos (from `Flutter/ephemeral/.symlinks/plugins/system_idle_macos/macos`)
@@ -22,6 +25,8 @@ DEPENDENCIES:
 EXTERNAL SOURCES:
   desktop_multi_window:
     :path: Flutter/ephemeral/.symlinks/plugins/desktop_multi_window/macos
+  desktop_screenstate:
+    :path: Flutter/ephemeral/.symlinks/plugins/desktop_screenstate/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
   screen_retriever_macos:
@@ -35,12 +40,13 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   desktop_multi_window: 566489c048b501134f9d7fb6a2354c60a9126486
+  desktop_screenstate: 8d6f9fdf53523f9f5247e0bac915a1a90e105ec7
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   screen_retriever_macos: 776e0fa5d42c6163d2bf772d22478df4b302b161
   system_idle_macos: a1c294eb2bf9ab9b91cb36be5c62f69540c93e07
   tray_manager: 9064e219c56d75c476e46b9a21182087930baf90
   window_manager: e25faf20d88283a0d46e7b1a759d07261ca27575
 
-PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
 
 COCOAPODS: 1.16.2

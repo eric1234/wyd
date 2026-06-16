@@ -129,19 +129,28 @@ void main() {
       );
     });
 
-    test('exposes injected user idle detector capability', () {
-      final userIdleDetector = _FakeUserIdleDetector();
-      final bindings = DesktopPlatformBindings.forPlatform(
-        isLinux: true,
-        isMacOS: false,
-        linuxStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
-        supportsUserIdleDetection: true,
-        userIdleDetector: userIdleDetector,
-      );
+    test(
+      'exposes injected user idle detector capability on Linux and macOS',
+      () {
+        for (final platform in const [
+          (isLinux: true, isMacOS: false),
+          (isLinux: false, isMacOS: true),
+        ]) {
+          final userIdleDetector = _FakeUserIdleDetector();
+          final bindings = DesktopPlatformBindings.forPlatform(
+            isLinux: platform.isLinux,
+            isMacOS: platform.isMacOS,
+            linuxStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
+            macOSStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
+            supportsUserIdleDetection: true,
+            userIdleDetector: userIdleDetector,
+          );
 
-      expect(bindings.capabilities.supportsUserIdleDetection, isTrue);
-      expect(bindings.userIdleDetector, same(userIdleDetector));
-    });
+          expect(bindings.capabilities.supportsUserIdleDetection, isTrue);
+          expect(bindings.userIdleDetector, same(userIdleDetector));
+        }
+      },
+    );
   });
 }
 

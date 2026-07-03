@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../../application/application.dart';
 import 'desktop_screen_state_power_event_adapter.dart';
+import 'event_channel_power_event_adapter.dart';
 import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'linux_dbus_power_event_adapter.dart';
@@ -96,7 +97,8 @@ final class DesktopPlatformBindings {
         supportsStartAtLogin:
             startupAtLoginAdapter is! UnsupportedStartupAtLoginAdapter,
         supportsPowerEvents: powerEventAdapter is! UnsupportedPowerEventAdapter,
-        supportsTrayClickActions: supportsTrayClickActions ?? isMacOS,
+        supportsTrayClickActions:
+            supportsTrayClickActions ?? (isMacOS || isWindows),
       ),
       startupAtLoginAdapter: startupAtLoginAdapter,
       powerEventAdapter: powerEventAdapter,
@@ -153,7 +155,7 @@ final class DesktopPlatformBindings {
       );
     }
     if (isWindows) {
-      return const UnsupportedPowerEventAdapter();
+      return const EventChannelPowerEventAdapter();
     }
     return const UnsupportedPowerEventAdapter();
   }

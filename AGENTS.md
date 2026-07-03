@@ -1,10 +1,9 @@
 # Agent Notes
 
 ## Project Snapshot
-- `wyd` is a Flutter/Dart desktop tray time tracker for Linux and macOS.
+- `wyd` is a Flutter/Dart desktop tray time tracker for Linux, macOS, and Windows.
 - It lives in the system tray/menu bar, periodically asks the user to confirm or correct the current task, and stores data locally in SQLite.
 - Keep the product small: this is a local-first tray utility, not a full time-tracking platform.
-- Windows runner files exist from the Flutter template, but the app currently gates runtime support to Linux and macOS.
 
 ## Code Map
 - `lib/main.dart`: boots the resident tray app and child report/settings windows.
@@ -21,6 +20,7 @@
 - `flutter test`
 - `./tool/run_integration_tests.sh linux`
 - `./tool/run_integration_tests.sh macos`
+- `./tool/run_integration_tests.sh windows`
 
 Run integration tests through `tool/run_integration_tests.sh`, not by targeting the whole `integration_test` directory. The script runs each file in a separate Flutter process to avoid desktop debug-connection issues.
 

@@ -194,7 +194,7 @@ final class _Harness {
     );
     final reportService = ReportService(
       transactions: SqliteTransactionRunner(database),
-      clock: _FakeClock(DateTime.utc(2026, 1, 2, 18)),
+      clock: _FakeClock(DateTime.utc(2026, 1, 4, 12)),
     );
     return _Harness(
       database: database,

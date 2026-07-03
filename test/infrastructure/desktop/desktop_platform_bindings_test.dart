@@ -89,7 +89,7 @@ void main() {
       },
     );
 
-    test('exposes best-effort package-backed start-at-login on Windows', () {
+    test('enables Windows tray, power, and start-at-login bindings', () {
       final startupAtLogin = _FakeStartupAtLoginAdapter();
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: false,
@@ -99,10 +99,10 @@ void main() {
       );
 
       expect(bindings.capabilities.supportsStartAtLogin, isTrue);
-      expect(bindings.capabilities.supportsPowerEvents, isFalse);
-      expect(bindings.capabilities.supportsTrayClickActions, isFalse);
+      expect(bindings.capabilities.supportsPowerEvents, isTrue);
+      expect(bindings.capabilities.supportsTrayClickActions, isTrue);
       expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
-      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+      expect(bindings.powerEventAdapter, isA<EventChannelPowerEventAdapter>());
       expect(
         bindings.nativeLifecycleAdapter,
         isA<UnsupportedNativeLifecycleAdapter>(),
@@ -130,18 +130,21 @@ void main() {
     });
 
     test(
-      'exposes injected user idle detector capability on Linux and macOS',
+      'exposes injected user idle detector capability on supported desktops',
       () {
         for (final platform in const [
-          (isLinux: true, isMacOS: false),
-          (isLinux: false, isMacOS: true),
+          (isLinux: true, isMacOS: false, isWindows: false),
+          (isLinux: false, isMacOS: true, isWindows: false),
+          (isLinux: false, isMacOS: false, isWindows: true),
         ]) {
           final userIdleDetector = _FakeUserIdleDetector();
           final bindings = DesktopPlatformBindings.forPlatform(
             isLinux: platform.isLinux,
             isMacOS: platform.isMacOS,
+            isWindows: platform.isWindows,
             linuxStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
             macOSStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
+            windowsStartupAtLoginFactory: () => _FakeStartupAtLoginAdapter(),
             supportsUserIdleDetection: true,
             userIdleDetector: userIdleDetector,
           );

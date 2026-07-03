@@ -1,9 +1,9 @@
 # Contributing to wyd
 
 Thank you for contributing to `wyd`. This project is a small, local-first
-Flutter desktop tray utility for Linux and macOS. Contributions should preserve
-that focus: lightweight desktop time tracking, local SQLite persistence, and a
-quiet tray/menu-bar experience.
+Flutter desktop tray utility for Linux, macOS, and Windows. Contributions should
+preserve that focus: lightweight desktop time tracking, local SQLite
+persistence, and a quiet tray/menu-bar experience.
 
 ## Ways to Contribute
 
@@ -28,6 +28,7 @@ behavior, startup behavior, or anything that affects user privacy.
    flutter doctor
    flutter config --enable-linux-desktop
    flutter config --enable-macos-desktop
+   flutter config --enable-windows-desktop
    ```
 
 3. On Debian/Ubuntu Linux machines, install the desktop dependencies used by
@@ -38,6 +39,9 @@ behavior, startup behavior, or anything that affects user privacy.
      libayatana-appindicator3-dev libxcb1-dev libxcb-screensaver0-dev \
      libwayland-dev lld-18
    ```
+
+   On Windows, install Visual Studio 2022 or Visual Studio Build Tools with the
+   "Desktop development with C++" workload before building or running.    
 
 4. Install project dependencies:
 
@@ -50,6 +54,7 @@ behavior, startup behavior, or anything that affects user privacy.
    ```bash
    flutter run -d linux
    flutter run -d macos
+   flutter run -d windows
    ```
 
 6. Build a release binary:
@@ -57,9 +62,11 @@ behavior, startup behavior, or anything that affects user privacy.
    ```bash
    flutter build linux --release
    flutter build macos --release
+   flutter build windows --release
    ```
 
-   The built apps will be placed under `build/linux/` and `build/macos/`.
+   The built apps will be placed under `build/linux/`, `build/macos/`, and
+   `build/windows/`.
 
 ## Project Structure
 
@@ -111,11 +118,12 @@ Run integration tests through the project script, not by targeting the whole
 ```bash
 ./tool/run_integration_tests.sh linux
 ./tool/run_integration_tests.sh macos
+./tool/run_integration_tests.sh windows
 ```
 
 The script runs each `integration_test/*_test.dart` file in a separate Flutter
 process to avoid desktop debug-connection issues. Pass the Flutter device ID as
-the first argument, such as `linux` or `macos`.
+the first argument, such as `linux`, `macos`, or `windows`.
 
 Add or update targeted tests for behavior changes. Platform tray behavior,
 startup behavior, idle detection, and window-management changes may also need a
@@ -151,9 +159,7 @@ Before opening a pull request, verify that:
   checks are explained.
 - User-facing behavior changes are reflected in documentation when appropriate.
 - UI changes include screenshots or a short description of the desktop behavior.
-- Linux and macOS behavior were considered. Windows runner files may exist from
-  the Flutter template, but runtime support is currently limited to Linux and
-  macOS.
+- Linux, macOS, and Windows behavior were considered.
 
 ## Bug Reports
 

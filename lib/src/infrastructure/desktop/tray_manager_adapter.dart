@@ -13,7 +13,8 @@ final class TrayManagerAdapter with tray.TrayListener implements TrayAdapter {
     bool? supportsTooltip,
   }) : iconAssets = iconAssets ?? TrayIconAssetSet.forCurrentPlatform(),
        supportsSecondaryClickMenu =
-           supportsSecondaryClickMenu ?? Platform.isMacOS,
+           supportsSecondaryClickMenu ??
+           (Platform.isMacOS || Platform.isWindows),
        supportsTooltip =
            supportsTooltip ?? (Platform.isMacOS || Platform.isWindows),
        _trayManager = trayManager ?? tray.trayManager;

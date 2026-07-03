@@ -1,4 +1,3 @@
-- [ ] Get application working on Windows
 - [ ] Is it maybe worth updating the CI so we can skip it with a special note?
 - [ ] On Mac, sometime the windows appears on other desktops I think.
   It should always appear on the current desktop.

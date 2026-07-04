@@ -1,14 +1,11 @@
 name: Feature Request
 description: Suggest a focused improvement for wyd.
-title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting an improvement. `wyd` is intended to stay small: a local-first Flutter desktop tray utility for Linux and macOS, with no accounts, cloud sync, telemetry, or full time-tracking platform scope.
-
-        Windows runner files may exist from the Flutter template, but Windows is not currently a supported runtime target.
+        Thanks for suggesting an improvement. `wyd` is intended to stay small: a local-first Flutter desktop tray utility for Linux, macOS and Windows, with no accounts, cloud sync, telemetry, or full time-tracking platform scope.
 
   - type: textarea
     id: problem
@@ -35,7 +32,8 @@ body:
       options:
         - Linux
         - macOS
-        - Cross-platform Linux and macOS
+        - Windows
+        - Cross-platform Linux, macOS and Windows
         - Development workflow only
         - Documentation only
     validations:

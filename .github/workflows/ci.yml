@@ -116,3 +116,7 @@ jobs:
       - name: Run macOS integration tests
         if: matrix.platform == 'macos'
         run: ./tool/run_integration_tests.sh macos
+
+      - name: Run Windows integration tests
+        if: matrix.platform == 'windows'
+        run: ./tool/run_integration_tests.sh windows

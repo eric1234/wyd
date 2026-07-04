@@ -102,10 +102,13 @@ void main() {
       expect(bindings.capabilities.supportsPowerEvents, isTrue);
       expect(bindings.capabilities.supportsTrayClickActions, isTrue);
       expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
-      expect(bindings.powerEventAdapter, isA<EventChannelPowerEventAdapter>());
+      expect(
+        bindings.powerEventAdapter,
+        isA<MethodChannelAcknowledgedPowerEventAdapter>(),
+      );
       expect(
         bindings.nativeLifecycleAdapter,
-        isA<UnsupportedNativeLifecycleAdapter>(),
+        isA<MethodChannelNativeLifecycleAdapter>(),
       );
     });
 

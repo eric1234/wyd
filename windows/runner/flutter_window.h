@@ -3,8 +3,6 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/encodable_value.h>
-#include <flutter/event_channel.h>
-#include <flutter/event_sink.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
 
@@ -30,11 +28,18 @@ class FlutterWindow : public Win32Window {
 
  private:
   void ConfigureSingleInstanceChannel();
-  void ConfigurePowerEventChannel();
+  void ConfigureLifecycleChannel();
+  void ConfigureAcknowledgedPowerEventChannel();
   void RegisterPowerNotifications();
   void UnregisterPowerNotifications();
   void NotifySecondInstanceActivated();
-  void SendPowerEvent(const std::string& event);
+  void RequestTerminationAndWait();
+  void SendAcknowledgedPowerEventAndWait(const std::string& event);
+  bool InvokeDartMethodAndWait(
+      flutter::MethodChannel<flutter::EncodableValue>* channel,
+      const std::string& method,
+      std::unique_ptr<flutter::EncodableValue> arguments,
+      DWORD timeout_ms);
 
   // The project to run.
   flutter::DartProject project_;
@@ -47,10 +52,15 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       single_instance_channel_;
 
-  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
-      power_event_channel_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>
-      power_event_sink_;
+  bool lifecycle_ready_ = false;
+  bool termination_request_in_progress_ = false;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      lifecycle_channel_;
+
+  bool power_events_ready_ = false;
+  bool power_event_wait_in_progress_ = false;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      acknowledged_power_event_channel_;
   HWND power_notification_window_ = nullptr;
   bool power_notifications_registered_ = false;
 

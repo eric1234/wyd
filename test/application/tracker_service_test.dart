@@ -74,6 +74,24 @@ void main() {
       },
     );
 
+    test('stopTask records explicit occurrence timestamp', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+      final sleepAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+      final snapshot = await harness.service.stopTask(
+        source: ActivitySource.systemSleep,
+        occurredAtUtc: sleepAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(harness.store.events.last.eventType, ActivityEventType.stopTask);
+      expect(harness.store.events.last.source, ActivitySource.systemSleep);
+      expect(harness.store.events.last.occurredAtUtc, sleepAt);
+      expect(harness.store.events.last.createdAtUtc, harness.clock.current);
+    });
+
     test(
       'nag timeout writes stop at prompt shown time and marks prompt expired',
       () async {

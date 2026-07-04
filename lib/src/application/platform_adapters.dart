@@ -177,6 +177,23 @@ abstract interface class PowerEventAdapter {
 
 enum PowerEvent { lock, sleep }
 
+final class PowerEventOccurrence {
+  const PowerEventOccurrence({
+    required this.event,
+    required this.occurredAtUtc,
+  });
+
+  final PowerEvent event;
+  final DateTime occurredAtUtc;
+}
+
+abstract interface class AcknowledgedPowerEventAdapter
+    implements PowerEventAdapter {
+  Future<void> initializeAcknowledged(
+    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
+  );
+}
+
 final class UnsupportedPowerEventAdapter implements PowerEventAdapter {
   const UnsupportedPowerEventAdapter();
 

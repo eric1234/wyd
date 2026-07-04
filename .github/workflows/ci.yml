@@ -84,10 +84,6 @@ jobs:
         if: ${{ !matrix.coverage }}
         run: flutter test
 
-      - name: Build Windows release
-        if: matrix.platform == 'windows'
-        run: flutter build windows --release
-
       - name: Generate HTML coverage report
         if: matrix.coverage
         run: genhtml coverage/lcov.info --output-directory coverage/html

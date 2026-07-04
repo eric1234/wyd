@@ -141,6 +141,10 @@ abstract interface class NativeLifecycleAdapter {
   Future<void> initialize(Future<void> Function() onTerminationRequested);
 }
 
+abstract interface class DisposablePlatformAdapter {
+  Future<void> dispose();
+}
+
 final class UnsupportedNativeLifecycleAdapter
     implements NativeLifecycleAdapter {
   const UnsupportedNativeLifecycleAdapter();

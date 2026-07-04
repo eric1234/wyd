@@ -5,6 +5,7 @@ import 'desktop_screen_state_power_event_adapter.dart';
 import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'linux_dbus_power_event_adapter.dart';
+import 'linux_logind_lifecycle_power_adapter.dart';
 import 'method_channel_acknowledged_power_event_adapter.dart';
 import 'method_channel_native_lifecycle_adapter.dart';
 import 'screen_saver_idle_user_idle_detector.dart';
@@ -47,9 +48,12 @@ final class DesktopPlatformBindings {
       }
     }
 
-    final linuxPowerEventAdapter = Platform.isLinux
-        ? await LinuxDbusPowerEventAdapter.create(logger: logger)
-        : null;
+    PowerEventAdapter? linuxPowerEventAdapter;
+    if (Platform.isLinux) {
+      linuxPowerEventAdapter =
+          await LinuxLogindLifecyclePowerAdapter.create(logger: logger) ??
+          await LinuxDbusPowerEventAdapter.create(logger: logger);
+    }
     logger.debug('idle detection backend selected: $idleBackend');
     return DesktopPlatformBindings.forPlatform(
       isLinux: Platform.isLinux,
@@ -103,9 +107,12 @@ final class DesktopPlatformBindings {
       startupAtLoginAdapter: startupAtLoginAdapter,
       powerEventAdapter: powerEventAdapter,
       userIdleDetector: userIdleDetector,
-      nativeLifecycleAdapter: isMacOS || isWindows
-          ? MethodChannelNativeLifecycleAdapter()
-          : const UnsupportedNativeLifecycleAdapter(),
+      nativeLifecycleAdapter: _nativeLifecycleAdapterForPlatform(
+        isLinux: isLinux,
+        isMacOS: isMacOS,
+        isWindows: isWindows,
+        powerEventAdapter: powerEventAdapter,
+      ),
     );
   }
 
@@ -171,5 +178,21 @@ final class DesktopPlatformBindings {
     } catch (_) {
       return const UnsupportedPowerEventAdapter();
     }
+  }
+
+  static NativeLifecycleAdapter _nativeLifecycleAdapterForPlatform({
+    required bool isLinux,
+    required bool isMacOS,
+    required bool isWindows,
+    required PowerEventAdapter powerEventAdapter,
+  }) {
+    final adapter = powerEventAdapter;
+    if (isLinux && adapter is NativeLifecycleAdapter) {
+      return adapter as NativeLifecycleAdapter;
+    }
+    if (isMacOS || isWindows) {
+      return MethodChannelNativeLifecycleAdapter();
+    }
+    return const UnsupportedNativeLifecycleAdapter();
   }
 }

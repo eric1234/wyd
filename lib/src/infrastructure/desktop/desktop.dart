@@ -4,6 +4,7 @@ export 'event_channel_power_event_adapter.dart';
 export 'gnome_idle_user_idle_detector.dart';
 export 'launch_at_startup_adapter.dart';
 export 'linux_dbus_power_event_adapter.dart';
+export 'linux_logind_lifecycle_power_adapter.dart';
 export 'method_channel_acknowledged_power_event_adapter.dart';
 export 'method_channel_native_lifecycle_adapter.dart';
 export 'method_channel_single_instance_adapter.dart';

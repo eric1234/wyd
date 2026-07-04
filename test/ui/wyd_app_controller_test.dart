@@ -457,6 +457,27 @@ void main() {
       },
     );
 
+    test('disposes shared platform power and lifecycle adapter once', () async {
+      final platformAdapter = _FakeSharedPlatformAdapter();
+      final harness = await _Harness.create(
+        powerEventAdapter: platformAdapter,
+        nativeLifecycleAdapter: platformAdapter,
+      );
+      addTearDown(() async {
+        await harness.tray.dispose();
+        await harness.window.dispose();
+        await harness.database.close();
+      });
+      await harness.controller.initialize();
+
+      harness.controller.dispose();
+      await _waitUntil(() => platformAdapter.disposeRequests == 1);
+
+      expect(platformAdapter.powerInitialized, isTrue);
+      expect(platformAdapter.lifecycleInitialized, isTrue);
+      expect(platformAdapter.disposeRequests, 1);
+    });
+
     test(
       'submitting nag closes quick entry without altering report window',
       () async {
@@ -766,6 +787,7 @@ final class _Harness {
     bool trayFailsOnInitialize = false,
     Duration? secondaryWindowWarmUpDelay,
     PowerEventAdapter powerEventAdapter = const UnsupportedPowerEventAdapter(),
+    NativeLifecycleAdapter? nativeLifecycleAdapter,
   }) async {
     final database = await AppDatabase.openInMemory(
       databaseFactory: databaseFactoryFfi,
@@ -800,7 +822,9 @@ final class _Harness {
       windowCoordinator: WindowCoordinator(window),
       nagScheduler: scheduler,
       singleInstanceAdapter: withSingleInstance ? singleInstance : null,
-      nativeLifecycleAdapter: withNativeLifecycle ? nativeLifecycle : null,
+      nativeLifecycleAdapter:
+          nativeLifecycleAdapter ??
+          (withNativeLifecycle ? nativeLifecycle : null),
       powerEventAdapter: powerEventAdapter,
       secondaryWindowWarmUpDelay: secondaryWindowWarmUpDelay,
       hideResidentWindow: () async {
@@ -876,6 +900,43 @@ final class _FakeAcknowledgedPowerEventAdapter
       throw StateError('Acknowledged power adapter is not initialized.');
     }
     await onPowerEvent(occurrence);
+  }
+}
+
+final class _FakeSharedPlatformAdapter
+    implements
+        AcknowledgedPowerEventAdapter,
+        NativeLifecycleAdapter,
+        DisposablePlatformAdapter {
+  bool powerInitialized = false;
+  bool lifecycleInitialized = false;
+  bool _disposed = false;
+  var disposeRequests = 0;
+
+  @override
+  Stream<PowerEvent> get events => const Stream.empty();
+
+  @override
+  Future<void> initialize(
+    Future<void> Function() onTerminationRequested,
+  ) async {
+    lifecycleInitialized = true;
+  }
+
+  @override
+  Future<void> initializeAcknowledged(
+    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
+  ) async {
+    powerInitialized = true;
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
+    disposeRequests += 1;
   }
 }
 

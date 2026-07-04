@@ -37,6 +37,23 @@ void main() {
 
       expect(bindings.capabilities.supportsPowerEvents, isTrue);
       expect(bindings.powerEventAdapter, same(powerEventAdapter));
+      expect(
+        bindings.nativeLifecycleAdapter,
+        isA<UnsupportedNativeLifecycleAdapter>(),
+      );
+    });
+
+    test('uses Linux power adapter as lifecycle adapter when supported', () {
+      final adapter = _FakeLinuxLifecyclePowerAdapter();
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        linuxPowerEventAdapterFactory: () => adapter,
+      );
+
+      expect(bindings.capabilities.supportsPowerEvents, isTrue);
+      expect(bindings.powerEventAdapter, same(adapter));
+      expect(bindings.nativeLifecycleAdapter, same(adapter));
     });
 
     test('falls back when Linux power adapter factory returns null', () {
@@ -177,4 +194,15 @@ final class _FakeUserIdleDetector implements UserIdleDetector {
 final class _FakePowerEventAdapter implements PowerEventAdapter {
   @override
   Stream<PowerEvent> get events => const Stream.empty();
+}
+
+final class _FakeLinuxLifecyclePowerAdapter
+    implements PowerEventAdapter, NativeLifecycleAdapter {
+  @override
+  Stream<PowerEvent> get events => const Stream.empty();
+
+  @override
+  Future<void> initialize(
+    Future<void> Function() onTerminationRequested,
+  ) async {}
 }

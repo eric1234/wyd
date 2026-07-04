@@ -71,6 +71,7 @@ final class WydAppController extends ChangeNotifier {
   String? _startupError;
   String? _runtimeErrorMessage;
   bool _initialized = false;
+  bool _platformAdaptersDisposed = false;
 
   AppStateSnapshot? get snapshot => _snapshot;
   WindowRole? get activeRole => _activeRole;
@@ -319,6 +320,7 @@ final class WydAppController extends ChangeNotifier {
     _windowCloseSubscription?.cancel();
     _powerEventSubscription?.cancel();
     _secondaryWindowWarmUpTimer?.cancel();
+    _disposePlatformAdapters();
     quickEntry.dispose();
     reportController?.dispose();
     settingsController?.dispose();
@@ -412,6 +414,7 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> _showFatalStartupError(Object error) async {
+    await _disposePlatformAdaptersBestEffort();
     _startupError = error.toString();
     _activeRole = WindowRole.quickEntry;
     notifyListeners();
@@ -460,6 +463,37 @@ final class WydAppController extends ChangeNotifier {
       await _trayAdapter.dispose().timeout(const Duration(seconds: 2));
     } catch (_) {
       // The process is exiting; stale tray cleanup is preferable to hanging.
+    }
+  }
+
+  void _disposePlatformAdapters() {
+    unawaited(_disposePlatformAdaptersBestEffort());
+  }
+
+  Future<void> _disposePlatformAdaptersBestEffort() async {
+    if (_platformAdaptersDisposed) {
+      return;
+    }
+    _platformAdaptersDisposed = true;
+
+    final adapters = <DisposablePlatformAdapter>{};
+    if (_powerEventAdapter case final DisposablePlatformAdapter adapter) {
+      adapters.add(adapter);
+    }
+    if (_nativeLifecycleAdapter case final DisposablePlatformAdapter adapter) {
+      adapters.add(adapter);
+    }
+
+    await Future.wait(adapters.map(_disposePlatformAdapter));
+  }
+
+  Future<void> _disposePlatformAdapter(
+    DisposablePlatformAdapter adapter,
+  ) async {
+    try {
+      await adapter.dispose();
+    } catch (_) {
+      // Controller disposal should not surface late platform cleanup failures.
     }
   }
 }

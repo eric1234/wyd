@@ -63,11 +63,15 @@ final class TrackerService {
 
   Future<AppStateSnapshot> stopTask({
     ActivitySource source = ActivitySource.manualStop,
+    DateTime? occurredAtUtc,
   }) {
     return _stateChangingOperation((transaction, nowUtc) async {
-      final transition = (await _loadTrackingSession(
-        transaction,
-      )).stopTask(nowUtc: nowUtc, source: source);
+      final stopOccurredAtUtc = occurredAtUtc?.toUtc() ?? nowUtc;
+      final transition = (await _loadTrackingSession(transaction)).stopTask(
+        nowUtc: stopOccurredAtUtc,
+        source: source,
+        createdAtUtc: nowUtc,
+      );
       await _applyTransition(transaction, transition);
     });
   }

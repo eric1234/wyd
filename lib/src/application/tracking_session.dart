@@ -31,11 +31,12 @@ final class TrackingSession {
   TrackingTransition stopTask({
     required DateTime nowUtc,
     required ActivitySource source,
+    DateTime? createdAtUtc,
   }) {
     final result = timeline.stopTask(
       occurredAtUtc: nowUtc,
       source: source,
-      createdAtUtc: nowUtc,
+      createdAtUtc: createdAtUtc ?? nowUtc,
     );
     final event = result.event;
     if (event == null) {

@@ -5,6 +5,7 @@ import 'desktop_screen_state_power_event_adapter.dart';
 import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'linux_dbus_power_event_adapter.dart';
+import 'method_channel_acknowledged_power_event_adapter.dart';
 import 'method_channel_native_lifecycle_adapter.dart';
 import 'screen_saver_idle_user_idle_detector.dart';
 import 'system_idle_user_idle_detector.dart';
@@ -96,12 +97,13 @@ final class DesktopPlatformBindings {
         supportsStartAtLogin:
             startupAtLoginAdapter is! UnsupportedStartupAtLoginAdapter,
         supportsPowerEvents: powerEventAdapter is! UnsupportedPowerEventAdapter,
-        supportsTrayClickActions: supportsTrayClickActions ?? isMacOS,
+        supportsTrayClickActions:
+            supportsTrayClickActions ?? (isMacOS || isWindows),
       ),
       startupAtLoginAdapter: startupAtLoginAdapter,
       powerEventAdapter: powerEventAdapter,
       userIdleDetector: userIdleDetector,
-      nativeLifecycleAdapter: isMacOS
+      nativeLifecycleAdapter: isMacOS || isWindows
           ? MethodChannelNativeLifecycleAdapter()
           : const UnsupportedNativeLifecycleAdapter(),
     );
@@ -153,7 +155,7 @@ final class DesktopPlatformBindings {
       );
     }
     if (isWindows) {
-      return const UnsupportedPowerEventAdapter();
+      return const MethodChannelAcknowledgedPowerEventAdapter();
     }
     return const UnsupportedPowerEventAdapter();
   }

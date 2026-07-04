@@ -99,12 +99,16 @@ final class WydAppController extends ChangeNotifier {
       _primaryClickSubscription = _trayAdapter.primaryClicks.listen(
         (_) => unawaited(_runUserAction(openQuickEntry)),
       );
-      _powerEventSubscription = _powerEventAdapter.events.listen(
-        (event) => unawaited(_runUserAction(() => handlePowerEvent(event))),
-        onError: (Object error, StackTrace stackTrace) {
-          unawaited(handleRuntimeError(error, stackTrace));
-        },
-      );
+      if (_powerEventAdapter case final AcknowledgedPowerEventAdapter adapter) {
+        await adapter.initializeAcknowledged(_handleAcknowledgedPowerEvent);
+      } else {
+        _powerEventSubscription = _powerEventAdapter.events.listen(
+          (event) => unawaited(_runUserAction(() => handlePowerEvent(event))),
+          onError: (Object error, StackTrace stackTrace) {
+            unawaited(handleRuntimeError(error, stackTrace));
+          },
+        );
+      }
       await _openQuickEntry();
       await _reconcileStartupAtLogin(_snapshot!);
       _scheduleSecondaryWindowWarmUp();
@@ -180,6 +184,26 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> handlePowerEvent(PowerEvent event) async {
+    await _handlePowerEvent(event: event, openPromptSynchronously: true);
+  }
+
+  Future<void> _handleAcknowledgedPowerEvent(
+    PowerEventOccurrence occurrence,
+  ) async {
+    await _runUserAction(
+      () => _handlePowerEvent(
+        event: occurrence.event,
+        occurredAtUtc: occurrence.occurredAtUtc,
+        openPromptSynchronously: false,
+      ),
+    );
+  }
+
+  Future<void> _handlePowerEvent({
+    required PowerEvent event,
+    DateTime? occurredAtUtc,
+    required bool openPromptSynchronously,
+  }) async {
     final beforeSnapshot = await _trackerService.loadSnapshot();
     if (beforeSnapshot.activeTask == null) {
       _snapshot = beforeSnapshot;
@@ -189,10 +213,25 @@ final class WydAppController extends ChangeNotifier {
       return;
     }
 
-    await _stopTaskAndOpenPrompt(switch (event) {
+    final source = switch (event) {
       PowerEvent.lock => ActivitySource.systemLock,
       PowerEvent.sleep => ActivitySource.systemSleep,
-    });
+    };
+    if (openPromptSynchronously) {
+      await _stopTaskAndOpenPrompt(source, occurredAtUtc: occurredAtUtc);
+      return;
+    }
+
+    final latestSnapshot = await _trackerService.stopTask(
+      source: source,
+      occurredAtUtc: occurredAtUtc,
+    );
+    _snapshot = latestSnapshot;
+    quickEntry.close();
+    await _refreshTray(latestSnapshot);
+    _nagScheduler?.update(latestSnapshot);
+    notifyListeners();
+    unawaited(_runUserAction(() => _openQuickEntry(snapshot: latestSnapshot)));
   }
 
   Future<AppStateSnapshot> nagPromptTimedOut() async {
@@ -336,8 +375,14 @@ final class WydAppController extends ChangeNotifier {
     await _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
   }
 
-  Future<void> _stopTaskAndOpenPrompt(ActivitySource source) async {
-    final latestSnapshot = await _trackerService.stopTask(source: source);
+  Future<void> _stopTaskAndOpenPrompt(
+    ActivitySource source, {
+    DateTime? occurredAtUtc,
+  }) async {
+    final latestSnapshot = await _trackerService.stopTask(
+      source: source,
+      occurredAtUtc: occurredAtUtc,
+    );
     _snapshot = latestSnapshot;
     quickEntry.close();
     await _openQuickEntry(snapshot: latestSnapshot);

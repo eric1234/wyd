@@ -30,6 +30,10 @@ jobs:
             os: macos-latest
             desktop: macos
             coverage: false
+          - platform: windows
+            os: windows-latest
+            desktop: windows
+            coverage: false
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -112,3 +116,8 @@ jobs:
       - name: Run macOS integration tests
         if: matrix.platform == 'macos'
         run: ./tool/run_integration_tests.sh macos
+
+      - name: Run Windows integration tests
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: ./tool/run_integration_tests.sh windows

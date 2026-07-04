@@ -444,6 +444,20 @@ void main() {
     });
 
     test(
+      'initializes acknowledged power adapter without subscribing to stream',
+      () async {
+        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+        final harness = await _Harness.create(powerEventAdapter: powerEvents);
+        addTearDown(harness.dispose);
+
+        await harness.controller.initialize();
+
+        expect(powerEvents.initialized, isTrue);
+        expect(powerEvents.eventsAccessed, isFalse);
+      },
+    );
+
+    test(
       'submitting nag closes quick entry without altering report window',
       () async {
         final harness = await _Harness.create(withScheduler: true);
@@ -523,6 +537,32 @@ void main() {
       expect(harness.window.closedRoles, isEmpty);
       expect(harness.window.focusedRoles.last, WindowRole.quickEntry);
     });
+
+    test(
+      'acknowledged sleep persists system stop at supplied timestamp',
+      () async {
+        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+        final harness = await _Harness.create(powerEventAdapter: powerEvents);
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        await harness.controller.openQuickEntry();
+        await harness.controller.quickEntry.updateText('Write docs');
+        await harness.controller.quickEntry.submit();
+        harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+        final sleepAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+        await powerEvents.emit(
+          PowerEventOccurrence(event: PowerEvent.sleep, occurredAtUtc: sleepAt),
+        );
+
+        final events = await harness.activityLog.allEvents();
+        expect(events.last.eventType, ActivityEventType.stopTask);
+        expect(events.last.source, ActivitySource.systemSleep);
+        expect(events.last.occurredAtUtc, sleepAt);
+        expect(harness.controller.snapshot!.activeTask, isNull);
+        expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+      },
+    );
 
     test(
       'submit immediately after system stop resumes interrupted task',
@@ -627,6 +667,39 @@ void main() {
       expect(events.last.source, ActivitySource.systemLock);
       expect(harness.controller.quickEntry.state.isOpen, isTrue);
     });
+
+    test(
+      'duplicate acknowledged events do not append duplicate stops',
+      () async {
+        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+        final harness = await _Harness.create(powerEventAdapter: powerEvents);
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        await harness.controller.openQuickEntry();
+        await harness.controller.quickEntry.updateText('Write docs');
+        await harness.controller.quickEntry.submit();
+
+        await powerEvents.emit(
+          PowerEventOccurrence(
+            event: PowerEvent.lock,
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
+          ),
+        );
+        await powerEvents.emit(
+          PowerEventOccurrence(
+            event: PowerEvent.sleep,
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
+          ),
+        );
+
+        final events = await harness.activityLog.allEvents();
+        expect(events.map((event) => event.eventType), [
+          ActivityEventType.startTask,
+          ActivityEventType.stopTask,
+        ]);
+        expect(events.last.source, ActivitySource.systemLock);
+      },
+    );
 
     test('power event stream errors surface as runtime errors', () async {
       final powerEvents = _FakePowerEventAdapter();
@@ -774,6 +847,35 @@ final class _FakePowerEventAdapter implements PowerEventAdapter {
 
   Future<void> dispose() async {
     await _events.close();
+  }
+}
+
+final class _FakeAcknowledgedPowerEventAdapter
+    implements AcknowledgedPowerEventAdapter {
+  bool initialized = false;
+  bool eventsAccessed = false;
+  Future<void> Function(PowerEventOccurrence occurrence)? _onPowerEvent;
+
+  @override
+  Stream<PowerEvent> get events {
+    eventsAccessed = true;
+    return const Stream.empty();
+  }
+
+  @override
+  Future<void> initializeAcknowledged(
+    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
+  ) async {
+    initialized = true;
+    _onPowerEvent = onPowerEvent;
+  }
+
+  Future<void> emit(PowerEventOccurrence occurrence) async {
+    final onPowerEvent = _onPowerEvent;
+    if (onPowerEvent == null) {
+      throw StateError('Acknowledged power adapter is not initialized.');
+    }
+    await onPowerEvent(occurrence);
   }
 }
 

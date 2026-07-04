@@ -41,9 +41,9 @@ Future<void> main(List<String> args) async {
 }
 
 Future<void> _runTrayApp() async {
-  if (!Platform.isLinux && !Platform.isMacOS) {
+  if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
     throw UnsupportedError(
-      'wyd currently supports Linux and macOS desktop only.',
+      'wyd currently supports Linux, macOS, and Windows desktop only.',
     );
   }
 
@@ -85,7 +85,7 @@ Future<void> _runTrayApp() async {
     powerEventAdapter: platformBindings.powerEventAdapter,
     nativeLifecycleAdapter: platformBindings.nativeLifecycleAdapter,
     startupAtLoginReconciler: settingsService.reconcileStartAtLogin,
-    hideResidentWindow: Platform.isMacOS
+    hideResidentWindow: Platform.isMacOS || Platform.isWindows
         ? primaryWindowAdapter.hideResidentWindow
         : null,
     reportController: ReportController(reportService),

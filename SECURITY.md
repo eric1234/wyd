@@ -2,19 +2,15 @@
 
 ## Supported Versions
 
-`wyd` is a local-first desktop tray application for Linux and macOS. Security
-fixes are made for the default branch and the latest published release, when a
-release exists.
+`wyd` is a local-first desktop tray application for Linux, macOS, and Windows.
+Security fixes are made for the default branch and the latest published release,
+when a release exists.
 
 | Version | Supported |
 | --- | --- |
 | Default branch | Yes |
 | Latest release | Yes |
 | Older releases | No |
-| Windows builds | No |
-
-Windows runner files may exist in the repository from the Flutter template, but
-Windows is not currently a supported runtime target for this project.
 
 ## Reporting a Vulnerability
 
@@ -30,7 +26,8 @@ including technical details.
 Include as much of the following as practical:
 
 - Affected `wyd` version, release, or commit SHA.
-- Operating system and desktop environment, such as macOS, GNOME, KDE, or Xfce.
+- Operating system and desktop environment, such as Windows, macOS, GNOME, KDE,
+  or Xfce.
 - Clear reproduction steps and the observed behavior.
 - Expected security impact, including whether local task history, settings,
   startup configuration, or app control flow is affected.

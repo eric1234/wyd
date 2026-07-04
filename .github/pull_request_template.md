@@ -12,10 +12,11 @@
 
 ## Platform Impact
 
-<!-- Describe Linux and macOS impact. Include distro/desktop-environment details for Linux-specific changes. -->
+<!-- Describe Linux, macOS, and Windows impact. Include distro/desktop-environment details for Linux-specific changes. -->
 
 - [ ] Linux behavior considered
 - [ ] macOS behavior considered
+- [ ] Windows behavior considered
 
 ## Screenshots or Recordings
 

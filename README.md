@@ -22,7 +22,7 @@ Platforms:
 
 - [x] Linux, with Ubuntu, Mint, Fedora, openSUSE and Xubuntu
 - [x] macOS
-- [ ] Windows
+- [x] Windows
 
 Linux limitations:
 

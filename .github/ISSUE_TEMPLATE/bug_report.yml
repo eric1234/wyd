@@ -1,12 +1,11 @@
 name: Bug Report
 description: Report a reproducible problem with wyd.
-title: "[Bug]: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. `wyd` is a local-first desktop tray app for Linux and macOS, and runtime environment details are especially helpful for tray, startup, idle-detection, and window-management issues.
+        Thanks for reporting a bug. `wyd` is a local-first desktop tray app for Linux, macOS and Windows, and runtime environment details are especially helpful for tray, startup, idle-detection, and window-management issues.
 
         Do not attach real task-history databases, private task names, secrets, or unsanitized logs. For suspected vulnerabilities, use GitHub private vulnerability reporting instead of a public issue.
 

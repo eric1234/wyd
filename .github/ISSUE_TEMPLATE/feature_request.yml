@@ -30,10 +30,10 @@ body:
       description: Choose the platforms where this feature matters.
       multiple: true
       options:
+        - Cross-platform Linux, macOS and Windows
         - Linux
         - macOS
         - Windows
-        - Cross-platform Linux, macOS and Windows
         - Development workflow only
         - Documentation only
     validations:

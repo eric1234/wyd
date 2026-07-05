@@ -1,6 +1,9 @@
 # wyd
 
-`wyd` stands for "What's ya doin?" It is a tray-based desktop time tracker
+> [!WARNING]
+> This app and codebase were generated largely with AI. It works well enough for the creator's personal use, but it may contain bugs, rough edges, and poor-quality code; do not treat it as an example of good software design or best practices.
+
+`wyd` stands for "Whatcha ya doin?" It is a tray-based desktop time tracker
 built with Flutter and Dart that stays out of the way in the system tray and
 periodically asks the user to confirm or correct the current task.
 

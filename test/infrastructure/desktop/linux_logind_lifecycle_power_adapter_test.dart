@@ -182,6 +182,30 @@ void main() {
         expect(closeRequests, 1);
       },
     );
+
+    test('releases inhibitor that arrives after startup timeout', () async {
+      final lateInhibitorCompleter = Completer<LinuxLogindInhibitor>();
+      var closeRequests = 0;
+      final adapter = await LinuxLogindLifecyclePowerAdapter.create(
+        acquireInhibitor: () => lateInhibitorCompleter.future,
+        logindSignalValueStreamFactory: (_) => const Stream.empty(),
+        lockSources: const [],
+        requestTimeout: const Duration(milliseconds: 1),
+        close: () async {
+          closeRequests += 1;
+        },
+        logger: _CapturingDiagnosticLogger(),
+      );
+
+      expect(adapter, isNull);
+      expect(closeRequests, 1);
+
+      final lateInhibitor = _FakeInhibitor();
+      lateInhibitorCompleter.complete(lateInhibitor);
+      await lateInhibitor.releasedFuture;
+
+      expect(lateInhibitor.released, isTrue);
+    });
   });
 }
 

@@ -117,7 +117,18 @@ final class LinuxLogindLifecyclePowerAdapter
       final acquire =
           acquireInhibitor ??
           () => _acquireDbusInhibitor(clientFor(LinuxDbusBus.system));
-      initialInhibitor = await acquire().timeout(requestTimeout);
+      final acquireFuture = acquire();
+      try {
+        initialInhibitor = await acquireFuture.timeout(requestTimeout);
+      } on TimeoutException catch (error, stackTrace) {
+        _releaseLateInhibitor(
+          acquireFuture,
+          logger: logger,
+          failureMessage:
+              'Linux logind inhibitor acquisition failed after startup timeout',
+        );
+        Error.throwWithStackTrace(error, stackTrace);
+      }
 
       final lockSourceCandidates = lockSources.where(
         (source) => source.isLockSource,
@@ -323,7 +334,12 @@ final class LinuxLogindLifecyclePowerAdapter
         error,
         stackTrace,
       );
-      _releaseLateInhibitor(acquireFuture);
+      _releaseLateInhibitor(
+        acquireFuture,
+        logger: _logger,
+        failureMessage:
+            'Linux logind inhibitor reacquisition failed after timeout',
+      );
       return;
     } catch (error, stackTrace) {
       _logger.error(
@@ -341,16 +357,16 @@ final class LinuxLogindLifecyclePowerAdapter
     _inhibitor = inhibitor;
   }
 
-  void _releaseLateInhibitor(Future<LinuxLogindInhibitor> acquireFuture) {
+  static void _releaseLateInhibitor(
+    Future<LinuxLogindInhibitor> acquireFuture, {
+    required DiagnosticLogger logger,
+    required String failureMessage,
+  }) {
     unawaited(
       acquireFuture.then(
         _releaseIgnoringErrors,
         onError: (Object error, StackTrace stackTrace) {
-          _logger.error(
-            'Linux logind inhibitor reacquisition failed after timeout',
-            error,
-            stackTrace,
-          );
+          logger.error(failureMessage, error, stackTrace);
         },
       ),
     );

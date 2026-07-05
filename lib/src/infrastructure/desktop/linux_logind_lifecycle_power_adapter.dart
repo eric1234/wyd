@@ -40,6 +40,7 @@ final class LinuxLogindLifecyclePowerAdapter
     required List<LinuxDbusPowerEventSource> lockSources,
     required LinuxDbusSignalValueStreamFactory lockSignalValueStreamFactory,
     required DateTime Function() nowUtc,
+    required Duration requestTimeout,
     required Future<void> Function() close,
     required DiagnosticLogger logger,
   }) : _inhibitor = initialInhibitor,
@@ -48,6 +49,7 @@ final class LinuxLogindLifecyclePowerAdapter
        _lockSources = List.unmodifiable(lockSources),
        _lockSignalValueStreamFactory = lockSignalValueStreamFactory,
        _nowUtc = nowUtc,
+       _requestTimeout = requestTimeout,
        _close = close,
        _logger = logger;
 
@@ -147,6 +149,7 @@ final class LinuxLogindLifecyclePowerAdapter
             lockSignalValueStreamFactory ??
             (source) => _lockSignalValuesFor(clientFor(source.bus), source),
         nowUtc: nowUtc ?? () => DateTime.now().toUtc(),
+        requestTimeout: requestTimeout,
         close: closeClients,
         logger: logger,
       );
@@ -169,6 +172,7 @@ final class LinuxLogindLifecyclePowerAdapter
   final List<LinuxDbusPowerEventSource> _lockSources;
   final LinuxDbusSignalValueStreamFactory _lockSignalValueStreamFactory;
   final DateTime Function() _nowUtc;
+  final Duration _requestTimeout;
   final Future<void> Function() _close;
   final DiagnosticLogger _logger;
 
@@ -309,7 +313,47 @@ final class LinuxLogindLifecyclePowerAdapter
     if (_disposed || _inhibitor != null) {
       return;
     }
-    _inhibitor = await _acquireInhibitor();
+    final acquireFuture = _acquireInhibitor();
+    LinuxLogindInhibitor inhibitor;
+    try {
+      inhibitor = await acquireFuture.timeout(_requestTimeout);
+    } on TimeoutException catch (error, stackTrace) {
+      _logger.error(
+        'Linux logind inhibitor reacquisition timed out',
+        error,
+        stackTrace,
+      );
+      _releaseLateInhibitor(acquireFuture);
+      return;
+    } catch (error, stackTrace) {
+      _logger.error(
+        'Linux logind inhibitor reacquisition failed',
+        error,
+        stackTrace,
+      );
+      return;
+    }
+
+    if (_disposed || _inhibitor != null) {
+      await _releaseIgnoringErrors(inhibitor);
+      return;
+    }
+    _inhibitor = inhibitor;
+  }
+
+  void _releaseLateInhibitor(Future<LinuxLogindInhibitor> acquireFuture) {
+    unawaited(
+      acquireFuture.then(
+        _releaseIgnoringErrors,
+        onError: (Object error, StackTrace stackTrace) {
+          _logger.error(
+            'Linux logind inhibitor reacquisition failed after timeout',
+            error,
+            stackTrace,
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _releaseInhibitor() async {

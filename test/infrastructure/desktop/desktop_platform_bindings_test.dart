@@ -56,6 +56,27 @@ void main() {
       expect(bindings.nativeLifecycleAdapter, same(adapter));
     });
 
+    test('skips Linux power and lifecycle adapters when excluded', () {
+      var powerFactoryCalls = 0;
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        includePowerLifecycleAdapters: false,
+        linuxPowerEventAdapterFactory: () {
+          powerFactoryCalls += 1;
+          return _FakeLinuxLifecyclePowerAdapter();
+        },
+      );
+
+      expect(powerFactoryCalls, 0);
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+      expect(
+        bindings.nativeLifecycleAdapter,
+        isA<UnsupportedNativeLifecycleAdapter>(),
+      );
+    });
+
     test('falls back when Linux power adapter factory returns null', () {
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: true,

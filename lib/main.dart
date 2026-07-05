@@ -134,7 +134,9 @@ Future<void> _runRoleWindow(
 }) async {
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
-  final platformBindings = await DesktopPlatformBindings.current();
+  final platformBindings = await DesktopPlatformBindings.current(
+    includePowerLifecycleAdapters: false,
+  );
   final trackerService = _trackerService(
     database,
     clock,

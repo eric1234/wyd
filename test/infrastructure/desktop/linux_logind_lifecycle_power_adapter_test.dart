@@ -120,6 +120,51 @@ void main() {
       expect(harness.closeRequests, 1);
     });
 
+    test('reacquire timeout does not block later events or dispose', () async {
+      final lockSource = LinuxDbusPowerEventAdapter.knownSources.firstWhere(
+        (source) => source.isLockSource,
+      );
+      final lateInhibitorCompleter = Completer<LinuxLogindInhibitor>();
+      var acquireRequests = 0;
+      final harness = await _Harness.create(
+        lockSources: [lockSource],
+        requestTimeout: const Duration(milliseconds: 1),
+        acquireInhibitor: (inhibitors) {
+          acquireRequests += 1;
+          if (acquireRequests == 1) {
+            final inhibitor = _FakeInhibitor();
+            inhibitors.add(inhibitor);
+            return Future.value(inhibitor);
+          }
+          return lateInhibitorCompleter.future;
+        },
+      );
+      addTearDown(harness.dispose);
+      final occurrences = <PowerEventOccurrence>[];
+      await harness.adapter.initialize(() async {});
+      await harness.adapter.initializeAcknowledged((occurrence) async {
+        occurrences.add(occurrence);
+      });
+
+      harness.emitLogind(LinuxLogindSignalKind.prepareForSleep, true);
+      await harness.inhibitors.first.releasedFuture;
+      harness.emitLogind(LinuxLogindSignalKind.prepareForSleep, false);
+      await _waitUntil(() => acquireRequests == 2);
+      harness.emitLock(lockSource, true);
+      await _waitUntil(
+        () => occurrences.any(
+          (occurrence) => occurrence.event == PowerEvent.lock,
+        ),
+      );
+
+      await harness.adapter.dispose().timeout(const Duration(milliseconds: 50));
+      final lateInhibitor = _FakeInhibitor();
+      lateInhibitorCompleter.complete(lateInhibitor);
+      await lateInhibitor.releasedFuture;
+
+      expect(lateInhibitor.released, isTrue);
+    });
+
     test(
       'returns null and closes resources when inhibitor acquisition fails',
       () async {
@@ -171,6 +216,10 @@ final class _Harness {
 
   static Future<_Harness> create({
     Iterable<LinuxDbusPowerEventSource> lockSources = const [],
+    Duration requestTimeout =
+        LinuxLogindLifecyclePowerAdapter.defaultRequestTimeout,
+    Future<LinuxLogindInhibitor> Function(List<_FakeInhibitor> inhibitors)?
+    acquireInhibitor,
   }) async {
     final inhibitors = <_FakeInhibitor>[];
     final logindControllers =
@@ -179,11 +228,13 @@ final class _Harness {
         <LinuxDbusPowerEventSource, StreamController<List<DBusValue>>>{};
     var closeRequests = 0;
     final adapter = await LinuxLogindLifecyclePowerAdapter.create(
-      acquireInhibitor: () async {
-        final inhibitor = _FakeInhibitor();
-        inhibitors.add(inhibitor);
-        return inhibitor;
-      },
+      acquireInhibitor: acquireInhibitor == null
+          ? () async {
+              final inhibitor = _FakeInhibitor();
+              inhibitors.add(inhibitor);
+              return inhibitor;
+            }
+          : () => acquireInhibitor(inhibitors),
       logindSignalValueStreamFactory: (signal) {
         return logindControllers
             .putIfAbsent(
@@ -203,6 +254,7 @@ final class _Harness {
             .stream;
       },
       nowUtc: () => DateTime.utc(2026, 1, 1, 9, 30),
+      requestTimeout: requestTimeout,
       close: () async {
         closeRequests += 1;
       },

@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import '../../application/application.dart';
-import 'desktop_screen_state_power_event_adapter.dart';
 import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'linux_dbus_power_event_adapter.dart';
@@ -165,7 +164,7 @@ final class DesktopPlatformBindings {
     if (isMacOS) {
       return _powerEventAdapterFromFactory(
         macOSPowerEventAdapterFactory ??
-            () => DesktopScreenStatePowerEventAdapter(),
+            () => const MethodChannelAcknowledgedPowerEventAdapter(),
       );
     }
     if (isWindows) {

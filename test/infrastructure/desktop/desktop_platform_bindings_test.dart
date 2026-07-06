@@ -100,7 +100,7 @@ void main() {
     });
 
     test(
-      'enables macOS tray lifecycle, plugin power, and start-at-login bindings',
+      'enables macOS tray lifecycle, acknowledged power, and start-at-login bindings',
       () {
         final startupAtLogin = _FakeStartupAtLoginAdapter();
         final bindings = DesktopPlatformBindings.forPlatform(
@@ -117,7 +117,7 @@ void main() {
         expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
         expect(
           bindings.powerEventAdapter,
-          isA<DesktopScreenStatePowerEventAdapter>(),
+          isA<MethodChannelAcknowledgedPowerEventAdapter>(),
         );
         expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
         expect(
@@ -126,6 +126,27 @@ void main() {
         );
       },
     );
+
+    test('skips macOS power and lifecycle adapters when excluded', () {
+      var powerFactoryCalls = 0;
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: false,
+        isMacOS: true,
+        includePowerLifecycleAdapters: false,
+        macOSPowerEventAdapterFactory: () {
+          powerFactoryCalls += 1;
+          return const MethodChannelAcknowledgedPowerEventAdapter();
+        },
+      );
+
+      expect(powerFactoryCalls, 0);
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+      expect(
+        bindings.nativeLifecycleAdapter,
+        isA<UnsupportedNativeLifecycleAdapter>(),
+      );
+    });
 
     test('enables Windows tray, power, and start-at-login bindings', () {
       final startupAtLogin = _FakeStartupAtLoginAdapter();

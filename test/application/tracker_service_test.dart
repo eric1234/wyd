@@ -160,6 +160,23 @@ void main() {
       expect(harness.store.events.last.occurredAtUtc, harness.clock.current);
     });
 
+    test('exit records explicit occurrence timestamp when supplied', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+      final shutdownAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+      final snapshot = await harness.service.exitRequested(
+        occurredAtUtc: shutdownAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(snapshot.runtimeState.cleanShutdown, isTrue);
+      expect(harness.store.events.last.source, ActivitySource.exit);
+      expect(harness.store.events.last.occurredAtUtc, shutdownAt);
+      expect(harness.store.events.last.createdAtUtc, harness.clock.current);
+    });
+
     test('recoverOnStartup marks clean shutdown launches as running', () async {
       final harness = _Harness();
       harness.store.runtimeState = RuntimeState(cleanShutdown: true);

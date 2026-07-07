@@ -76,11 +76,11 @@ final class TrackerService {
     });
   }
 
-  Future<AppStateSnapshot> exitRequested() {
+  Future<AppStateSnapshot> exitRequested({DateTime? occurredAtUtc}) {
     return _stateChangingOperation((transaction, nowUtc) async {
       final transition = (await _loadTrackingSession(
         transaction,
-      )).exitRequested(nowUtc: nowUtc);
+      )).exitRequested(nowUtc: nowUtc, occurredAtUtc: occurredAtUtc);
       await _applyTransition(transaction, transition);
     });
   }

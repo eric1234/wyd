@@ -42,9 +42,9 @@ void main() {
       final adapter = MethodChannelAcknowledgedPowerEventAdapter(
         channel: channel,
       );
-      PowerEventOccurrence? occurrence;
+      final occurrences = <PowerEventOccurrence>[];
       await adapter.initializeAcknowledged((value) async {
-        occurrence = value;
+        occurrences.add(value);
       });
 
       await _sendMethodCall(
@@ -54,9 +54,18 @@ void main() {
           'occurredAtUtc': '2026-01-01T09:30:00.000Z',
         }),
       );
+      await _sendMethodCall(
+        channelName,
+        const MethodCall('powerEvent', {
+          'event': 'shutdown',
+          'occurredAtUtc': '2026-01-01T09:45:00.000Z',
+        }),
+      );
 
-      expect(occurrence!.event, PowerEvent.sleep);
-      expect(occurrence!.occurredAtUtc, DateTime.utc(2026, 1, 1, 9, 30));
+      expect(occurrences[0].event, PowerEvent.sleep);
+      expect(occurrences[0].occurredAtUtc, DateTime.utc(2026, 1, 1, 9, 30));
+      expect(occurrences[1].event, PowerEvent.shutdown);
+      expect(occurrences[1].occurredAtUtc, DateTime.utc(2026, 1, 1, 9, 45));
     });
 
     test('responds only after the callback completes', () async {

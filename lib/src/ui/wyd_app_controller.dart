@@ -205,6 +205,11 @@ final class WydAppController extends ChangeNotifier {
     DateTime? occurredAtUtc,
     required bool openPromptSynchronously,
   }) async {
+    if (event == PowerEvent.shutdown) {
+      await _prepareForSystemShutdown(occurredAtUtc: occurredAtUtc);
+      return;
+    }
+
     final beforeSnapshot = await _trackerService.loadSnapshot();
     if (beforeSnapshot.activeTask == null) {
       _snapshot = beforeSnapshot;
@@ -217,6 +222,7 @@ final class WydAppController extends ChangeNotifier {
     final source = switch (event) {
       PowerEvent.lock => ActivitySource.systemLock,
       PowerEvent.sleep => ActivitySource.systemSleep,
+      PowerEvent.shutdown => throw StateError('Shutdown handled separately.'),
     };
     if (openPromptSynchronously) {
       await _stopTaskAndOpenPrompt(source, occurredAtUtc: occurredAtUtc);
@@ -273,6 +279,18 @@ final class WydAppController extends ChangeNotifier {
     _activeRole = null;
     await _bestEffortExitCleanup();
     await _onExit();
+  }
+
+  Future<void> _prepareForSystemShutdown({DateTime? occurredAtUtc}) async {
+    final latestSnapshot = await _trackerService.exitRequested(
+      occurredAtUtc: occurredAtUtc,
+    );
+    _snapshot = latestSnapshot;
+    await _refreshTray(latestSnapshot);
+    _nagScheduler?.update(latestSnapshot);
+    quickEntry.close();
+    _activeRole = null;
+    notifyListeners();
   }
 
   Future<void> exitAfterStartupError() async {

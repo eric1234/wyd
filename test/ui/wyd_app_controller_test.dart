@@ -586,6 +586,64 @@ void main() {
     );
 
     test(
+      'acknowledged shutdown prepares clean state without exiting',
+      () async {
+        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+        final harness = await _Harness.create(
+          withScheduler: true,
+          powerEventAdapter: powerEvents,
+        );
+        addTearDown(harness.dispose);
+        await harness.controller.initialize();
+        await harness.controller.openQuickEntry();
+        await harness.controller.quickEntry.updateText('Write docs');
+        await harness.controller.quickEntry.submit();
+        await harness.controller.openQuickEntry();
+        harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+        final shutdownAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+        await powerEvents.emit(
+          PowerEventOccurrence(
+            event: PowerEvent.shutdown,
+            occurredAtUtc: shutdownAt,
+          ),
+        );
+
+        final events = await harness.activityLog.allEvents();
+        expect(events.last.eventType, ActivityEventType.stopTask);
+        expect(events.last.source, ActivitySource.exit);
+        expect(events.last.occurredAtUtc, shutdownAt);
+        expect(harness.controller.snapshot!.activeTask, isNull);
+        expect(harness.controller.snapshot!.runtimeState.cleanShutdown, isTrue);
+        expect(harness.exitRequests(), 0);
+        expect(harness.controller.activeRole, isNull);
+        expect(harness.controller.quickEntry.state.isOpen, isFalse);
+        expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
+        expect(harness.timers.activeTimers, isEmpty);
+      },
+    );
+
+    test('shutdown while idle marks clean shutdown without exit', () async {
+      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+
+      await powerEvents.emit(
+        PowerEventOccurrence(
+          event: PowerEvent.shutdown,
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
+        ),
+      );
+
+      expect(await harness.activityLog.allEvents(), isEmpty);
+      expect(harness.controller.snapshot!.runtimeState.cleanShutdown, isTrue);
+      expect(harness.exitRequests(), 0);
+      expect(harness.controller.activeRole, isNull);
+      expect(harness.controller.quickEntry.state.isOpen, isFalse);
+    });
+
+    test(
       'submit immediately after system stop resumes interrupted task',
       () async {
         final harness = await _Harness.create();

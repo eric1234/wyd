@@ -53,16 +53,20 @@ final class TrackingSession {
     );
   }
 
-  TrackingTransition exitRequested({required DateTime nowUtc}) {
+  TrackingTransition exitRequested({
+    required DateTime nowUtc,
+    DateTime? occurredAtUtc,
+  }) {
     final activeTask = timeline.activeTask;
     final shouldStopActiveTask =
         activeTask != null &&
         runtimeState.promptState.status != PromptStatus.expired;
+    final stopOccurredAtUtc = occurredAtUtc?.toUtc() ?? nowUtc;
 
     return TrackingTransition(
       eventToAppend: shouldStopActiveTask
           ? ActivityLogEvent.stopTask(
-              occurredAtUtc: nowUtc,
+              occurredAtUtc: stopOccurredAtUtc,
               source: ActivitySource.exit,
               createdAtUtc: nowUtc,
             )

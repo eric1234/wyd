@@ -57,6 +57,16 @@ behavior, startup behavior, or anything that affects user privacy.
    flutter run -d windows
    ```
 
+   To clear local SQLite data during development, run the matching command. If
+   `wyd` is still running, the command exits with an error instead of clearing
+   data:
+
+   ```bash
+   flutter run -d linux -a --clear-data
+   flutter run -d macos -a --clear-data
+   flutter run -d windows -a --clear-data
+   ```
+
 6. Build a release binary:
 
    ```bash

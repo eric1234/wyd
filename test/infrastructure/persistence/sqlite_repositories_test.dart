@@ -69,6 +69,83 @@ void main() {
       }
     });
 
+    test('lists database and SQLite sidecar paths', () {
+      final databasePath = p.join('tmp', 'wyd.sqlite');
+
+      expect(AppDatabase.databaseFilePathsFor(databasePath), [
+        databasePath,
+        '$databasePath-wal',
+        '$databasePath-shm',
+        '$databasePath-journal',
+      ]);
+    });
+
+    test('deletes database files and ignores missing files', () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'wyd_sqlite_delete_',
+      );
+      final databasePath = p.join(tempDirectory.path, 'wyd.sqlite');
+
+      try {
+        for (final filePath in AppDatabase.databaseFilePathsFor(databasePath)) {
+          await File(filePath).writeAsString('test');
+        }
+
+        await AppDatabase.deleteDatabaseFiles(databasePath);
+        await AppDatabase.deleteDatabaseFiles(databasePath);
+
+        for (final filePath in AppDatabase.databaseFilePathsFor(databasePath)) {
+          expect(await File(filePath).exists(), isFalse);
+        }
+      } finally {
+        if (await tempDirectory.exists()) {
+          await tempDirectory.delete(recursive: true);
+        }
+      }
+    });
+
+    test('reopens as a fresh database after deleting files', () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'wyd_sqlite_fresh_',
+      );
+      final databasePath = p.join(tempDirectory.path, 'wyd.sqlite');
+      AppDatabase? database;
+      AppDatabase? freshDatabase;
+
+      try {
+        database = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+        );
+        await SqliteActivityLogRepository(database.database).append(
+          ActivityLogEvent.startTask(
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 9),
+            taskText: 'Delete me',
+          ),
+        );
+        await database.close();
+        database = null;
+
+        await AppDatabase.deleteDatabaseFiles(databasePath);
+
+        freshDatabase = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+        );
+        final events = await SqliteActivityLogRepository(
+          freshDatabase.database,
+        ).allEvents();
+
+        expect(events, isEmpty);
+      } finally {
+        await freshDatabase?.close();
+        await database?.close();
+        if (await tempDirectory.exists()) {
+          await tempDirectory.delete(recursive: true);
+        }
+      }
+    });
+
     test('configures SQLite pragmas for production connections', () async {
       final tempDirectory = await Directory.systemTemp.createTemp(
         'wyd_sqlite_pragmas_',

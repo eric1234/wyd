@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -18,9 +19,16 @@ const _mainWindowEventsChannel = WindowMethodChannel(
   'wyd/main_window_events',
   mode: ChannelMode.unidirectional,
 );
+const _clearDataFlag = '--clear-data';
+const _clearDataDebugExitDelay = Duration(seconds: 2);
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (args.contains(_clearDataFlag)) {
+    await _clearDataAndExit();
+    return;
+  }
 
   final currentWindow = await WindowController.fromCurrentEngine();
   final childWindowRole = decodeRoleWindowRole(currentWindow.arguments);
@@ -38,6 +46,30 @@ Future<void> main(List<String> args) async {
   } catch (error) {
     await _runFatalStartupApp(error);
   }
+}
+
+Future<void> _clearDataAndExit() async {
+  try {
+    final databasePath = await AppDatabase.defaultDatabasePath();
+    await AppDatabase.deleteDatabaseFiles(databasePath);
+    stdout.writeln('Cleared wyd data.');
+    await stdout.flush();
+    await _waitForDebugToolingBeforeExit();
+    exit(0);
+  } catch (error) {
+    stderr.writeln('Failed to clear wyd data: $error');
+    await stderr.flush();
+    await _waitForDebugToolingBeforeExit();
+    exit(1);
+  }
+}
+
+Future<void> _waitForDebugToolingBeforeExit() async {
+  if (kReleaseMode) {
+    return;
+  }
+
+  await Future<void>.delayed(_clearDataDebugExitDelay);
 }
 
 Future<void> _runTrayApp() async {

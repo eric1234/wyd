@@ -27,6 +27,20 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+static gboolean arguments_contain_clear_data(gchar** arguments) {
+  if (arguments == nullptr) {
+    return FALSE;
+  }
+
+  for (gchar** argument = arguments; *argument != nullptr; argument++) {
+    if (g_strcmp0(*argument, "--clear-data") == 0) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
 static void single_instance_method_call_cb(FlMethodChannel* channel,
                                            FlMethodCall* method_call,
                                            gpointer user_data) {
@@ -292,15 +306,24 @@ static void my_application_activate(GApplication* application) {
 
 // Implements GApplication::local_command_line.
 static gboolean my_application_local_command_line(GApplication* application,
-                                                  gchar*** arguments,
-                                                  int* exit_status) {
+                                                   gchar*** arguments,
+                                                   int* exit_status) {
   MyApplication* self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
-  self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+  gchar** dart_entrypoint_arguments = *arguments + 1;
+  gboolean clear_data_requested =
+      arguments_contain_clear_data(dart_entrypoint_arguments);
+  self->dart_entrypoint_arguments = g_strdupv(dart_entrypoint_arguments);
 
   g_autoptr(GError) error = nullptr;
   if (!g_application_register(application, nullptr, &error)) {
     g_warning("Failed to register: %s", error->message);
+    *exit_status = 1;
+    return TRUE;
+  }
+
+  if (clear_data_requested && g_application_get_is_remote(application)) {
+    g_printerr("wyd is currently running. Quit wyd before clearing data.\n");
     *exit_status = 1;
     return TRUE;
   }

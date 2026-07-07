@@ -18,9 +18,15 @@ const _mainWindowEventsChannel = WindowMethodChannel(
   'wyd/main_window_events',
   mode: ChannelMode.unidirectional,
 );
+const _clearDataFlag = '--clear-data';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (args.contains(_clearDataFlag)) {
+    await _clearDataAndExit();
+    return;
+  }
 
   final currentWindow = await WindowController.fromCurrentEngine();
   final childWindowRole = decodeRoleWindowRole(currentWindow.arguments);
@@ -37,6 +43,18 @@ Future<void> main(List<String> args) async {
     await _runTrayApp();
   } catch (error) {
     await _runFatalStartupApp(error);
+  }
+}
+
+Future<void> _clearDataAndExit() async {
+  try {
+    final databasePath = await AppDatabase.defaultDatabasePath();
+    await AppDatabase.deleteDatabaseFiles(databasePath);
+    stdout.writeln('Cleared wyd data.');
+    exit(0);
+  } catch (error) {
+    stderr.writeln('Failed to clear wyd data: $error');
+    exit(1);
   }
 }
 

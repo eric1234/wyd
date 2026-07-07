@@ -11,6 +11,7 @@ final class AppDatabase {
 
   static const schemaVersion = 2;
   static const databaseFileName = 'wyd.sqlite';
+  static const _databaseSidecarSuffixes = ['-wal', '-shm', '-journal'];
 
   static bool _ffiInitialized = false;
 
@@ -64,6 +65,30 @@ final class AppDatabase {
     final directory = await getApplicationSupportDirectory();
     await Directory(directory.path).create(recursive: true);
     return p.join(directory.path, databaseFileName);
+  }
+
+  static List<String> databaseFilePathsFor(String databasePath) {
+    return [
+      databasePath,
+      for (final suffix in _databaseSidecarSuffixes) '$databasePath$suffix',
+    ];
+  }
+
+  static Future<void> deleteDatabaseFiles(String databasePath) async {
+    for (final filePath in databaseFilePathsFor(databasePath)) {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        continue;
+      }
+
+      try {
+        await file.delete();
+      } on FileSystemException {
+        if (await file.exists()) {
+          rethrow;
+        }
+      }
+    }
   }
 
   Future<T> transaction<T>(Future<T> Function(Transaction transaction) action) {

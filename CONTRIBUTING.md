@@ -62,9 +62,9 @@ behavior, startup behavior, or anything that affects user privacy.
    data:
 
    ```bash
-   flutter run -d linux -a=--clear-data
-   flutter run -d macos -a=--clear-data
-   flutter run -d windows -a=--clear-data
+   flutter run -d linux -a --clear-data
+   flutter run -d macos -a --clear-data
+   flutter run -d windows -a --clear-data
    ```
 
 6. Build a release binary:

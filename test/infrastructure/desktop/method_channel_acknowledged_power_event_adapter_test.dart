@@ -61,11 +61,20 @@ void main() {
           'occurredAtUtc': '2026-01-01T09:45:00.000Z',
         }),
       );
+      await _sendMethodCall(
+        channelName,
+        const MethodCall('powerEvent', {
+          'event': 'shutdown_cancelled',
+          'occurredAtUtc': '2026-01-01T09:46:00.000Z',
+        }),
+      );
 
       expect(occurrences[0].event, PowerEvent.sleep);
       expect(occurrences[0].occurredAtUtc, DateTime.utc(2026, 1, 1, 9, 30));
       expect(occurrences[1].event, PowerEvent.shutdown);
       expect(occurrences[1].occurredAtUtc, DateTime.utc(2026, 1, 1, 9, 45));
+      expect(occurrences[2].event, PowerEvent.shutdownCancelled);
+      expect(occurrences[2].occurredAtUtc, DateTime.utc(2026, 1, 1, 9, 46));
     });
 
     test('responds only after the callback completes', () async {

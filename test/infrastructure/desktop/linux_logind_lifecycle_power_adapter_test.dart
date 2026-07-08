@@ -81,15 +81,38 @@ void main() {
     test('reacquires inhibitor after cancelled shutdown', () async {
       final harness = await _Harness.create();
       addTearDown(harness.dispose);
-      await harness.adapter.initializeAcknowledged((_) async {});
+      final occurrences = <PowerEventOccurrence>[];
+      await harness.adapter.initializeAcknowledged((occurrence) async {
+        occurrences.add(occurrence);
+      });
 
       harness.emitLogind(LinuxLogindSignalKind.prepareForShutdown, true);
       await harness.inhibitors.first.releasedFuture;
       harness.emitLogind(LinuxLogindSignalKind.prepareForShutdown, false);
-      await _waitUntil(() => harness.inhibitors.length == 2);
+      await _waitUntil(() => occurrences.length == 2);
 
       expect(harness.inhibitors.first.released, isTrue);
       expect(harness.inhibitors.last.released, isFalse);
+      expect(occurrences.map((occurrence) => occurrence.event), [
+        PowerEvent.shutdown,
+        PowerEvent.shutdownCancelled,
+      ]);
+    });
+
+    test('does not emit cancellation without shutdown preparation', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final occurrences = <PowerEventOccurrence>[];
+      await harness.adapter.initializeAcknowledged((occurrence) async {
+        occurrences.add(occurrence);
+      });
+
+      harness.emitLogind(LinuxLogindSignalKind.prepareForShutdown, false);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(occurrences, isEmpty);
+      expect(harness.inhibitors, hasLength(1));
+      expect(harness.inhibitors.single.released, isFalse);
     });
 
     test(

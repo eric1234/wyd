@@ -623,6 +623,43 @@ void main() {
       },
     );
 
+    test('cancelled shutdown reopens prompt after stopping task', () async {
+      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+      await harness.controller.openQuickEntry();
+      await harness.controller.quickEntry.updateText('Write docs');
+      await harness.controller.quickEntry.submit();
+
+      await powerEvents.emit(
+        PowerEventOccurrence(
+          event: PowerEvent.shutdown,
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
+        ),
+      );
+      harness.window.openedRoles.clear();
+      harness.window.focusedRoles.clear();
+
+      await powerEvents.emit(
+        PowerEventOccurrence(
+          event: PowerEvent.shutdownCancelled,
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
+        ),
+      );
+
+      final events = await harness.activityLog.allEvents();
+      expect(events.map((event) => event.eventType), [
+        ActivityEventType.startTask,
+        ActivityEventType.stopTask,
+      ]);
+      expect(events.last.source, ActivitySource.exit);
+      expect(harness.exitRequests(), 0);
+      expect(harness.controller.activeRole, WindowRole.quickEntry);
+      expect(harness.controller.quickEntry.state.isOpen, isTrue);
+      expect(harness.window.openedRoles, [WindowRole.quickEntry]);
+    });
+
     test('shutdown while idle marks clean shutdown without exit', () async {
       final powerEvents = _FakeAcknowledgedPowerEventAdapter();
       final harness = await _Harness.create(powerEventAdapter: powerEvents);
@@ -641,6 +678,36 @@ void main() {
       expect(harness.exitRequests(), 0);
       expect(harness.controller.activeRole, isNull);
       expect(harness.controller.quickEntry.state.isOpen, isFalse);
+    });
+
+    test('cancelled idle shutdown does not open prompt', () async {
+      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+
+      await powerEvents.emit(
+        PowerEventOccurrence(
+          event: PowerEvent.shutdown,
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
+        ),
+      );
+      harness.window.openedRoles.clear();
+      harness.window.focusedRoles.clear();
+
+      await powerEvents.emit(
+        PowerEventOccurrence(
+          event: PowerEvent.shutdownCancelled,
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
+        ),
+      );
+
+      expect(await harness.activityLog.allEvents(), isEmpty);
+      expect(harness.exitRequests(), 0);
+      expect(harness.controller.activeRole, isNull);
+      expect(harness.controller.quickEntry.state.isOpen, isFalse);
+      expect(harness.window.openedRoles, isEmpty);
+      expect(harness.window.focusedRoles, isEmpty);
     });
 
     test(

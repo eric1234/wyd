@@ -171,6 +171,7 @@ final class LinuxLogindLifecyclePowerAdapter
   Future<void> _eventChain = Future.value();
   bool _started = false;
   bool _disposed = false;
+  bool _shutdownPreparationInProgress = false;
 
   @override
   Stream<PowerEvent> get events => const Stream.empty();
@@ -244,7 +245,7 @@ final class LinuxLogindLifecyclePowerAdapter
   ) async {
     final started = _singleBooleanValue(signal.label, values);
     if (!started) {
-      await _acquireInhibitorIfNeeded();
+      await _handleLogindSignalEnded(signal);
       return;
     }
 
@@ -254,6 +255,26 @@ final class LinuxLogindLifecyclePowerAdapter
       case LinuxLogindSignalKind.prepareForShutdown:
         await _handleShutdownStarted();
     }
+  }
+
+  Future<void> _handleLogindSignalEnded(LinuxLogindSignal signal) async {
+    var shouldEmitShutdownCancelled = false;
+    if (signal.kind == LinuxLogindSignalKind.prepareForShutdown) {
+      shouldEmitShutdownCancelled = _shutdownPreparationInProgress;
+      _shutdownPreparationInProgress = false;
+    }
+
+    await _acquireInhibitorIfNeeded();
+
+    if (!shouldEmitShutdownCancelled) {
+      return;
+    }
+    await _onPowerEvent?.call(
+      PowerEventOccurrence(
+        event: PowerEvent.shutdownCancelled,
+        occurredAtUtc: _nowUtc(),
+      ),
+    );
   }
 
   Future<void> _handleLockSignal(
@@ -285,6 +306,7 @@ final class LinuxLogindLifecyclePowerAdapter
 
   Future<void> _handleShutdownStarted() async {
     final occurredAtUtc = _nowUtc();
+    _shutdownPreparationInProgress = true;
     try {
       await _onPowerEvent?.call(
         PowerEventOccurrence(

@@ -179,7 +179,7 @@ abstract interface class PowerEventAdapter {
   Stream<PowerEvent> get events;
 }
 
-enum PowerEvent { lock, sleep, shutdown }
+enum PowerEvent { lock, sleep, shutdown, shutdownCancelled }
 
 final class PowerEventOccurrence {
   const PowerEventOccurrence({

@@ -68,6 +68,7 @@ final class MethodChannelAcknowledgedPowerEventAdapter
       'lock' => PowerEvent.lock,
       'sleep' => PowerEvent.sleep,
       'shutdown' => PowerEvent.shutdown,
+      'shutdown_cancelled' => PowerEvent.shutdownCancelled,
       _ => throw ArgumentError.value(event, 'event', 'Unknown power event.'),
     };
   }

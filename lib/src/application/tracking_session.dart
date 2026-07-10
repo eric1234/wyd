@@ -61,7 +61,12 @@ final class TrackingSession {
     final shouldStopActiveTask =
         activeTask != null &&
         runtimeState.promptState.status != PromptStatus.expired;
-    final stopOccurredAtUtc = occurredAtUtc?.toUtc() ?? nowUtc;
+    final requestedStopAtUtc = occurredAtUtc?.toUtc() ?? nowUtc;
+    final stopOccurredAtUtc =
+        activeTask != null &&
+            requestedStopAtUtc.isBefore(activeTask.startedAtUtc)
+        ? activeTask.startedAtUtc
+        : requestedStopAtUtc;
 
     return TrackingTransition(
       eventToAppend: shouldStopActiveTask

@@ -148,7 +148,7 @@ void main() {
         inhibitorCompleter.complete(_FakeInhibitor());
         await initializeFuture;
 
-        expect(harness.inhibitors.single.released, isFalse);
+        expect(harness.inhibitors.single.released, isTrue);
       },
     );
 

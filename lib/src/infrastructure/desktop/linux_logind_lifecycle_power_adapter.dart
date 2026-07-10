@@ -172,6 +172,7 @@ final class LinuxLogindLifecyclePowerAdapter
   bool _started = false;
   bool _disposed = false;
   bool _shutdownPreparationInProgress = false;
+  int _transitionGeneration = 0;
 
   @override
   Stream<PowerEvent> get events => const Stream.empty();
@@ -291,6 +292,7 @@ final class LinuxLogindLifecyclePowerAdapter
   }
 
   Future<void> _handleSleepStarted() async {
+    _transitionGeneration += 1;
     final occurredAtUtc = _nowUtc();
     try {
       await _onPowerEvent?.call(
@@ -305,6 +307,7 @@ final class LinuxLogindLifecyclePowerAdapter
   }
 
   Future<void> _handleShutdownStarted() async {
+    _transitionGeneration += 1;
     final occurredAtUtc = _nowUtc();
     _shutdownPreparationInProgress = true;
     try {
@@ -324,6 +327,7 @@ final class LinuxLogindLifecyclePowerAdapter
       return;
     }
     late final Future<LinuxLogindInhibitor> acquireFuture;
+    final transitionGeneration = _transitionGeneration;
     try {
       acquireFuture = _acquireInhibitor();
     } catch (error, stackTrace) {
@@ -360,7 +364,9 @@ final class LinuxLogindLifecyclePowerAdapter
       return;
     }
 
-    if (_disposed || _inhibitor != null) {
+    if (_disposed ||
+        _inhibitor != null ||
+        transitionGeneration != _transitionGeneration) {
       await _releaseIgnoringErrors(inhibitor);
       return;
     }

@@ -177,6 +177,20 @@ void main() {
       expect(harness.store.events.last.createdAtUtc, harness.clock.current);
     });
 
+    test('exit does not place stop before active task start', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      final taskStartedAt = harness.clock.current;
+      final shutdownAt = taskStartedAt.subtract(const Duration(minutes: 1));
+
+      final snapshot = await harness.service.exitRequested(
+        occurredAtUtc: shutdownAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(harness.store.events.last.occurredAtUtc, taskStartedAt);
+    });
+
     test('recoverOnStartup marks clean shutdown launches as running', () async {
       final harness = _Harness();
       harness.store.runtimeState = RuntimeState(cleanShutdown: true);

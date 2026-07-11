@@ -134,8 +134,14 @@ bool _optionalBool(
 }
 
 final class DesktopMultiWindowAdapter implements WindowAdapter {
-  DesktopMultiWindowAdapter({required WindowAdapter primaryWindowAdapter})
-    : _primaryWindowAdapter = primaryWindowAdapter {
+  DesktopMultiWindowAdapter({
+    required WindowAdapter primaryWindowAdapter,
+    Duration childWindowReadyPollInterval = const Duration(milliseconds: 50),
+    int childWindowReadyMaxAttempts = 200,
+  }) : assert(childWindowReadyMaxAttempts > 0),
+       _primaryWindowAdapter = primaryWindowAdapter,
+       _childWindowReadyPollInterval = childWindowReadyPollInterval,
+       _childWindowReadyMaxAttempts = childWindowReadyMaxAttempts {
     _primaryCloseSubscription = _primaryWindowAdapter.closeRequests.listen(
       _closeRequests.add,
     );
@@ -145,6 +151,8 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
   }
 
   final WindowAdapter _primaryWindowAdapter;
+  final Duration _childWindowReadyPollInterval;
+  final int _childWindowReadyMaxAttempts;
   final StreamController<WindowHandle> _closeRequests =
       StreamController<WindowHandle>.broadcast();
   final Map<String, WindowRole> _childWindowRoles = {};
@@ -160,7 +168,23 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
       return _primaryWindowAdapter.open(configuration);
     }
 
-    return _createChildWindow(configuration.role, showOnReady: true);
+    final handle = await _createChildWindow(
+      configuration.role,
+      showOnReady: false,
+    );
+    try {
+      await _waitForChildWindowReady(handle);
+      await _invokeChildWindow<void>(
+        handle,
+        RoleWindowProtocol.configureMethod,
+        encodeRoleWindowConfiguration(configuration),
+      );
+      await focus(handle);
+      return handle;
+    } catch (_) {
+      await _cleanupFailedChildWindow(handle);
+      rethrow;
+    }
   }
 
   @override
@@ -173,8 +197,13 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
       configuration.role,
       showOnReady: false,
     );
-    await _waitForChildWindowReady(handle);
-    return handle;
+    try {
+      await _waitForChildWindowReady(handle);
+      return handle;
+    } catch (_) {
+      await _cleanupFailedChildWindow(handle);
+      rethrow;
+    }
   }
 
   Future<WindowHandle> _createChildWindow(
@@ -273,7 +302,11 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
 
   Future<void> _waitForChildWindowReady(WindowHandle handle) async {
     Object? lastError;
-    for (var attempt = 0; attempt < 40; attempt += 1) {
+    for (
+      var attempt = 0;
+      attempt < _childWindowReadyMaxAttempts;
+      attempt += 1
+    ) {
       try {
         final ready = await _invokeChildWindow<bool>(
           handle,
@@ -285,10 +318,23 @@ final class DesktopMultiWindowAdapter implements WindowAdapter {
       } catch (error) {
         lastError = error;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(_childWindowReadyPollInterval);
     }
 
     throw StateError('Timed out warming child window ${handle.id}: $lastError');
+  }
+
+  Future<void> _cleanupFailedChildWindow(WindowHandle handle) async {
+    _childWindowRoles.remove(handle.id);
+    try {
+      await _invokeChildWindow<void>(
+        handle,
+        RoleWindowProtocol.closeMethod,
+      ).timeout(const Duration(seconds: 1));
+    } catch (_) {
+      // The child may have failed before installing its method handler. Child
+      // startup also closes its own native window when initialization throws.
+    }
   }
 
   Future<void> _emitClosedChildWindows() async {

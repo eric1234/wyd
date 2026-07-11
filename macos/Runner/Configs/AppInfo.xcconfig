@@ -11,4 +11,4 @@ PRODUCT_NAME = wyd
 PRODUCT_BUNDLE_IDENTIFIER = invalid.wyd
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Public domain under the Unlicense.
+PRODUCT_COPYRIGHT = Public domain under the Unlicense. Author: Eric Anderson.

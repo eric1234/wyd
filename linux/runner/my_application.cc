@@ -7,6 +7,7 @@
 
 #include <desktop_multi_window/desktop_multi_window_plugin.h>
 #include <screen_retriever_linux/screen_retriever_linux_plugin.h>
+#include <url_launcher_linux/url_launcher_plugin.h>
 #include <window_manager/window_manager_plugin.h>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -15,6 +16,9 @@ struct LinuxWindowAttentionTarget {
   GtkWindow* window;
   FlView* view;
 };
+
+constexpr int kChildWindowInitialWidth = 380;
+constexpr int kChildWindowInitialHeight = 340;
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -170,6 +174,26 @@ static void register_child_linux_window_attention_channel(
                          channel, g_object_unref);
 }
 
+static void override_child_window_default_size(FlPluginRegistry* registry) {
+  g_autoptr(FlPluginRegistrar) registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry,
+                                                  "WydChildWindowDefaults");
+  FlView* view = fl_plugin_registrar_get_view(registrar);
+  GtkWidget* toplevel = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  if (!GTK_IS_WINDOW(toplevel)) {
+    return;
+  }
+
+  GtkWindow* window = GTK_WINDOW(toplevel);
+  // desktop_multi_window defaults every Linux child to 1280x720. Use the
+  // smallest role size as a hidden fallback; Dart applies the actual role size
+  // before showing the child.
+  gtk_window_set_default_size(window, kChildWindowInitialWidth,
+                              kChildWindowInitialHeight);
+  gtk_window_resize(window, kChildWindowInitialWidth,
+                    kChildWindowInitialHeight);
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -253,6 +277,8 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
   desktop_multi_window_plugin_set_window_created_callback(
       [](FlPluginRegistry* registry) {
+        override_child_window_default_size(registry);
+
         // Child windows must not register tray_manager. The tray belongs to the
         // primary process window; registering it in child engines can steal tray
         // menu events from the controller that handles Report/Settings/Exit.
@@ -267,6 +293,11 @@ static void my_application_activate(GApplication* application) {
                 registry, "ScreenRetrieverLinuxPlugin");
         screen_retriever_linux_plugin_register_with_registrar(
             screen_retriever_registrar);
+
+        g_autoptr(FlPluginRegistrar) url_launcher_registrar =
+            fl_plugin_registry_get_registrar_for_plugin(registry,
+                                                        "UrlLauncherPlugin");
+        url_launcher_plugin_register_with_registrar(url_launcher_registrar);
 
         g_autoptr(FlPluginRegistrar) window_manager_registrar =
             fl_plugin_registry_get_registrar_for_plugin(

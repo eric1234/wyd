@@ -25,11 +25,17 @@ Future<void> main(List<String> args) async {
   final currentWindow = await WindowController.fromCurrentEngine();
   final childWindowRole = decodeRoleWindowRole(currentWindow.arguments);
   if (childWindowRole != null) {
-    await _runRoleWindow(
-      childWindowRole,
-      currentWindow,
-      showOnReady: decodeRoleWindowShowOnReady(currentWindow.arguments),
-    );
+    try {
+      await _runRoleWindow(
+        childWindowRole,
+        currentWindow,
+        showOnReady: decodeRoleWindowShowOnReady(currentWindow.arguments),
+      );
+    } catch (_) {
+      await windowManager.ensureInitialized();
+      await windowManager.close();
+      rethrow;
+    }
     return;
   }
 
@@ -197,6 +203,8 @@ Future<void> _runRoleWindow(
         client: settingsService,
         onSaved: (_) => _notifyMainWindowStateChanged(),
       );
+    case WindowRole.about:
+      break;
     case WindowRole.quickEntry:
       break;
   }
@@ -210,7 +218,9 @@ Future<void> _runRoleWindow(
   );
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(() async {
-      await windowManager.waitUntilReadyToShow();
+      await windowManager.waitUntilReadyToShow(
+        _windowOptionsFor(windowConfiguration),
+      );
       await windowConfigurator.apply(windowConfiguration);
       ready = true;
       if (showOnReady) {
@@ -225,6 +235,19 @@ Future<void> _runRoleWindow(
   });
 }
 
+WindowOptions _windowOptionsFor(WindowRoleConfiguration configuration) {
+  final size = Size(configuration.width, configuration.height);
+  return WindowOptions(
+    size: size,
+    center: true,
+    minimumSize: configuration.resizable ? null : size,
+    maximumSize: configuration.resizable ? null : size,
+    alwaysOnTop: configuration.alwaysOnTop,
+    skipTaskbar: configuration.role == WindowRole.quickEntry,
+    title: configuration.title,
+  );
+}
+
 void _refreshRoleForShow(
   WindowRole role, {
   required ReportController? reportController,
@@ -235,6 +258,8 @@ void _refreshRoleForShow(
       reportController?.refreshForShow();
     case WindowRole.settings:
       settingsController?.refreshForShow();
+    case WindowRole.about:
+      break;
     case WindowRole.quickEntry:
       break;
   }
@@ -250,6 +275,8 @@ Future<void> _handleRoleWindowBeforeHide(
       reportController?.close();
     case WindowRole.settings:
       await settingsController?.commitChanges();
+    case WindowRole.about:
+      break;
     case WindowRole.quickEntry:
       break;
   }

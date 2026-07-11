@@ -26,6 +26,7 @@ void main() {
         'Stop Task',
         'Report',
         'Settings',
+        'About',
         'Exit',
       ]);
     });
@@ -63,10 +64,12 @@ void main() {
 
       await coordinator.openOrFocus(WindowRole.quickEntry);
       await coordinator.openOrFocus(WindowRole.report);
+      await coordinator.openOrFocus(WindowRole.about);
 
       expect(adapter.openedConfigurations.map((config) => config.role), [
         WindowRole.quickEntry,
         WindowRole.report,
+        WindowRole.about,
       ]);
       expect(adapter.openedConfigurations.first.resizable, isFalse);
       expect(adapter.openedConfigurations.first.alwaysOnTop, isTrue);
@@ -74,6 +77,9 @@ void main() {
         adapter.openedConfigurations.first.height,
         WindowRoleConfiguration.quickEntryHeight,
       );
+      expect(adapter.openedConfigurations.last.title, 'About wyd');
+      expect(adapter.openedConfigurations.last.resizable, isFalse);
+      expect(adapter.openedConfigurations.last.alwaysOnTop, isFalse);
     });
 
     test(

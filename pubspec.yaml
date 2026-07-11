@@ -1,5 +1,6 @@
 name: wyd
-description: "What's ya doin? A tray-based desktop time tracker."
+description: Time tracking that nags you
+repository: https://github.com/eric1234/wyd
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -46,6 +47,8 @@ dependencies:
   launch_at_startup: ^0.5.1
   dbus: ^0.7.12
   desktop_screenstate: ^0.0.6+1
+  package_info_plus: ^9.0.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

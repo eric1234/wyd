@@ -89,14 +89,15 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "wyd" "\0"
+            VALUE "CompanyName", "Eric Anderson" "\0"
+            VALUE "FileDescription", "Time tracking that nags you" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "wyd" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Public domain under the Unlicense. Author: Eric Anderson." "\0"
             VALUE "OriginalFilename", "wyd.exe" "\0"
             VALUE "ProductName", "wyd" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
+            VALUE "Comments", "https://github.com/eric1234/wyd" "\0"
         END
     END
     BLOCK "VarFileInfo"

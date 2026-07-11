@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/domain.dart';
 import '../layout_metrics.dart';
 import 'report_controller.dart';
 
@@ -42,7 +43,8 @@ class _ReportViewState extends State<ReportView> {
   @override
   Widget build(BuildContext context) {
     final report = _state.report;
-    final selectedDate = _state.selectedDate;
+    final selection = _state.selection;
+    final dateRange = _state.dateRange;
     final metrics = WydLayoutMetrics.of(context);
     final sectionGap = metrics.space(0.75);
 
@@ -54,16 +56,22 @@ class _ReportViewState extends State<ReportView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              _RangePresetSelector(
+                value: selection?.preset ?? ReportRangePreset.day,
+                loading: _state.loading,
+                onChanged: widget.controller.selectPreset,
+              ),
+              SizedBox(height: metrics.space(0.25)),
               _DateHeader(
-                title: selectedDate == null
+                title: dateRange == null
                     ? 'Report'
-                    : _formatDate(selectedDate),
+                    : _formatRange(dateRange, _state.today),
                 loading: _state.loading,
                 canGoNext: _state.canGoNext,
-                onPrevious: widget.controller.previousDay,
-                onNext: widget.controller.nextDay,
+                onPrevious: widget.controller.previousWindow,
+                onNext: widget.controller.nextWindow,
               ),
-              SizedBox(height: sectionGap),
+              SizedBox(height: metrics.space(0.5)),
               if (_state.loading)
                 const Expanded(
                   child: Center(child: CircularProgressIndicator()),
@@ -81,7 +89,7 @@ class _ReportViewState extends State<ReportView> {
                   child: _ReportStatus(
                     icon: Icons.timer_off_outlined,
                     title: 'No tracked time.',
-                    message: 'Tracked time for this day will appear here.',
+                    message: 'Tracked time for this range will appear here.',
                   ),
                 )
               else ...[
@@ -120,6 +128,46 @@ class _ReportViewState extends State<ReportView> {
   }
 }
 
+class _RangePresetSelector extends StatelessWidget {
+  const _RangePresetSelector({
+    required this.value,
+    required this.loading,
+    required this.onChanged,
+  });
+
+  final ReportRangePreset value;
+  final bool loading;
+  final ValueChanged<ReportRangePreset> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<ReportRangePreset>(
+      key: ValueKey(value),
+      initialValue: value,
+      decoration: const InputDecoration(
+        labelText: 'Range',
+        border: OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: ReportRangePreset.values
+          .map(
+            (preset) => DropdownMenuItem(
+              value: preset,
+              child: Text(_presetLabel(preset)),
+            ),
+          )
+          .toList(),
+      onChanged: loading
+          ? null
+          : (preset) {
+              if (preset != null) {
+                onChanged(preset);
+              }
+            },
+    );
+  }
+}
+
 class _DateHeader extends StatelessWidget {
   const _DateHeader({
     required this.title,
@@ -146,7 +194,7 @@ class _DateHeader extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              tooltip: 'Previous day',
+              tooltip: 'Previous period',
               onPressed: loading ? null : onPrevious,
               icon: const Icon(Icons.chevron_left),
             ),
@@ -158,7 +206,7 @@ class _DateHeader extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: 'Next day',
+              tooltip: 'Next period',
               onPressed: loading || !canGoNext ? null : onNext,
               icon: const Icon(Icons.chevron_right),
             ),
@@ -186,7 +234,7 @@ class _TotalCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Tracked today',
+              'Tracked in range',
               style: Theme.of(context).textTheme.labelLarge,
             ),
             SizedBox(height: metrics.space(0.25)),
@@ -263,3 +311,27 @@ String _formatDate(DateTime date) {
   final day = date.day.toString().padLeft(2, '0');
   return '${date.year}-$month-$day';
 }
+
+String _formatRange(ReportDateRange range, DateTime? today) {
+  final start = range.startLocalDateInclusive;
+  var end = DateTime(
+    range.endLocalDateExclusive.year,
+    range.endLocalDateExclusive.month,
+    range.endLocalDateExclusive.day - 1,
+  );
+  if (today != null && end.isAfter(today)) {
+    end = today;
+  }
+  if (start == end) {
+    return _formatDate(start);
+  }
+  return '${_formatDate(start)} - ${_formatDate(end)}';
+}
+
+String _presetLabel(ReportRangePreset preset) => switch (preset) {
+  ReportRangePreset.day => 'Day',
+  ReportRangePreset.week => 'Week',
+  ReportRangePreset.month => 'Month',
+  ReportRangePreset.quarter => 'Quarter',
+  ReportRangePreset.year => 'Year',
+};

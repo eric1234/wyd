@@ -5,9 +5,22 @@ import 'package:flutter/foundation.dart';
 import '../../application/application.dart';
 import '../../domain/domain.dart';
 
+enum ReportRangePreset { day, week, month, quarter, year }
+
+final class ReportSelection {
+  ReportSelection({required this.preset, required DateTime anchorDate})
+    : anchorDate = DateTime(anchorDate.year, anchorDate.month, anchorDate.day);
+
+  final ReportRangePreset preset;
+  final DateTime anchorDate;
+
+  ReportDateRange get dateRange =>
+      _dateRange(preset, _periodStart(preset, anchorDate));
+}
+
 final class ReportState {
   const ReportState({
-    this.selectedDate,
+    this.selection,
     this.today,
     this.report,
     this.loading = false,
@@ -15,27 +28,30 @@ final class ReportState {
     this.isOpen = false,
   });
 
-  final DateTime? selectedDate;
+  final ReportSelection? selection;
   final DateTime? today;
-  final DailyReport? report;
+  final ActivityReport? report;
   final bool loading;
   final String? errorMessage;
   final bool isOpen;
 
+  ReportDateRange? get dateRange => selection?.dateRange;
+
   bool get canGoNext {
-    final selected = selectedDate;
+    final currentSelection = selection;
     final currentToday = today;
-    if (selected == null || currentToday == null) {
+    if (currentSelection == null || currentToday == null) {
       return false;
     }
 
-    return selected.isBefore(currentToday);
+    final next = _shiftSelection(currentSelection, 1);
+    return !next.anchorDate.isAfter(currentToday);
   }
 
   ReportState copyWith({
-    DateTime? selectedDate,
+    ReportSelection? selection,
     DateTime? today,
-    DailyReport? report,
+    ActivityReport? report,
     bool clearReport = false,
     bool? loading,
     String? errorMessage,
@@ -43,7 +59,7 @@ final class ReportState {
     bool? isOpen,
   }) {
     return ReportState(
-      selectedDate: selectedDate ?? this.selectedDate,
+      selection: selection ?? this.selection,
       today: today ?? this.today,
       report: clearReport ? null : report ?? this.report,
       loading: loading ?? this.loading,
@@ -58,7 +74,7 @@ final class ReportState {
 final class ReportController extends ChangeNotifier {
   ReportController(this._service);
 
-  final DailyReportLoader _service;
+  final ActivityReportLoader _service;
   ReportState _state = const ReportState();
   int _loadRequest = 0;
 
@@ -69,14 +85,20 @@ final class ReportController extends ChangeNotifier {
       return;
     }
 
-    await loadDate(_service.todayLocalDate(), isOpen: true);
+    await loadSelection(
+      ReportSelection(
+        preset: ReportRangePreset.day,
+        anchorDate: _service.todayLocalDate(),
+      ),
+      isOpen: true,
+    );
   }
 
   void refreshForShow() {
-    final selected = _state.isOpen
-        ? _state.selectedDate ?? _service.todayLocalDate()
-        : _service.todayLocalDate();
-    unawaited(loadDate(selected, isOpen: true, clearReport: true));
+    final selection = _state.isOpen
+        ? _state.selection ?? _todaySelection()
+        : _todaySelection();
+    unawaited(loadSelection(selection, isOpen: true, clearReport: true));
   }
 
   void close() {
@@ -84,39 +106,38 @@ final class ReportController extends ChangeNotifier {
     _setState(_state.copyWith(isOpen: false, loading: false));
   }
 
-  Future<void> previousDay() async {
-    final selected = _state.selectedDate ?? _service.todayLocalDate();
-    await loadDate(DateTime(selected.year, selected.month, selected.day - 1));
+  Future<void> selectPreset(ReportRangePreset preset) async {
+    final anchor = _state.selection?.anchorDate ?? _service.todayLocalDate();
+    await loadSelection(ReportSelection(preset: preset, anchorDate: anchor));
   }
 
-  Future<void> nextDay() async {
+  Future<void> previousWindow() async {
+    final selection = _state.selection ?? _todaySelection();
+    await loadSelection(_shiftSelection(selection, -1));
+  }
+
+  Future<void> nextWindow() async {
     if (!_state.canGoNext) {
       return;
     }
 
-    final selected = _state.selectedDate!;
-    await loadDate(DateTime(selected.year, selected.month, selected.day + 1));
+    await loadSelection(_shiftSelection(_state.selection!, 1));
   }
 
-  Future<void> loadDate(
-    DateTime localDate, {
+  Future<void> loadSelection(
+    ReportSelection selection, {
     bool? isOpen,
     bool clearReport = false,
   }) async {
     final today = _service.todayLocalDate();
-    final normalizedDate = DateTime(
-      localDate.year,
-      localDate.month,
-      localDate.day,
-    );
-    if (normalizedDate.isAfter(today)) {
+    if (selection.anchorDate.isAfter(today)) {
       return;
     }
     final request = ++_loadRequest;
 
     _setState(
       _state.copyWith(
-        selectedDate: normalizedDate,
+        selection: selection,
         today: today,
         loading: true,
         clearErrorMessage: true,
@@ -126,13 +147,13 @@ final class ReportController extends ChangeNotifier {
     );
 
     try {
-      final report = await _service.loadDailyReport(normalizedDate);
+      final report = await _service.loadReport(selection.dateRange);
       if (request != _loadRequest) {
         return;
       }
       _setState(
         _state.copyWith(
-          selectedDate: normalizedDate,
+          selection: selection,
           today: today,
           report: report,
           loading: false,
@@ -146,7 +167,7 @@ final class ReportController extends ChangeNotifier {
       }
       _setState(
         _state.copyWith(
-          selectedDate: normalizedDate,
+          selection: selection,
           today: today,
           loading: false,
           errorMessage: error.toString(),
@@ -156,8 +177,82 @@ final class ReportController extends ChangeNotifier {
     }
   }
 
+  ReportSelection _todaySelection() => ReportSelection(
+    preset: ReportRangePreset.day,
+    anchorDate: _service.todayLocalDate(),
+  );
+
   void _setState(ReportState state) {
     _state = state;
     notifyListeners();
   }
+}
+
+ReportSelection _shiftSelection(ReportSelection selection, int amount) {
+  final anchor = _periodStart(selection.preset, selection.anchorDate);
+  final shifted = switch (selection.preset) {
+    ReportRangePreset.day => DateTime(
+      anchor.year,
+      anchor.month,
+      anchor.day + amount,
+    ),
+    ReportRangePreset.week => DateTime(
+      anchor.year,
+      anchor.month,
+      anchor.day + (7 * amount),
+    ),
+    ReportRangePreset.month => DateTime(anchor.year, anchor.month + amount),
+    ReportRangePreset.quarter => DateTime(
+      anchor.year,
+      anchor.month + (3 * amount),
+    ),
+    ReportRangePreset.year => DateTime(anchor.year + amount),
+  };
+  return ReportSelection(preset: selection.preset, anchorDate: shifted);
+}
+
+DateTime _periodStart(ReportRangePreset preset, DateTime date) {
+  final localDate = DateTime(date.year, date.month, date.day);
+  return switch (preset) {
+    ReportRangePreset.day => localDate,
+    ReportRangePreset.week => DateTime(
+      localDate.year,
+      localDate.month,
+      localDate.day - (localDate.weekday - DateTime.monday),
+    ),
+    ReportRangePreset.month => DateTime(localDate.year, localDate.month),
+    ReportRangePreset.quarter => DateTime(
+      localDate.year,
+      ((localDate.month - 1) ~/ 3) * 3 + 1,
+    ),
+    ReportRangePreset.year => DateTime(localDate.year),
+  };
+}
+
+ReportDateRange _dateRange(ReportRangePreset preset, DateTime periodStart) {
+  final end = switch (preset) {
+    ReportRangePreset.day => DateTime(
+      periodStart.year,
+      periodStart.month,
+      periodStart.day + 1,
+    ),
+    ReportRangePreset.week => DateTime(
+      periodStart.year,
+      periodStart.month,
+      periodStart.day + 7,
+    ),
+    ReportRangePreset.month => DateTime(
+      periodStart.year,
+      periodStart.month + 1,
+    ),
+    ReportRangePreset.quarter => DateTime(
+      periodStart.year,
+      periodStart.month + 3,
+    ),
+    ReportRangePreset.year => DateTime(periodStart.year + 1),
+  };
+  return ReportDateRange(
+    startLocalDateInclusive: periodStart,
+    endLocalDateExclusive: end,
+  );
 }

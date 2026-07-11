@@ -126,6 +126,35 @@ void main() {
     }
   });
 
+  testWidgets('resets the range dropdown after closing and reopening', (
+    tester,
+  ) async {
+    final loader = _FakeReportLoader();
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: ReportView(controller: controller)),
+      );
+
+      await tester.tap(find.byType(DropdownButtonFormField<ReportRangePreset>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Week').last);
+      await tester.pumpAndSettle();
+      expect(_selectedRange(tester), ReportRangePreset.week);
+
+      controller.close();
+      controller.refreshForShow();
+      await tester.pumpAndSettle();
+
+      expect(_selectedRange(tester), ReportRangePreset.day);
+      expect(find.text('2026-01-02'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
   testWidgets('previous and next buttons navigate date ranges', (tester) async {
     final loader = _FakeReportLoader();
     final controller = ReportController(loader);
@@ -219,6 +248,14 @@ Widget _scaledMaterialApp({required Widget home}) {
     },
     home: home,
   );
+}
+
+ReportRangePreset? _selectedRange(WidgetTester tester) {
+  return tester
+      .widget<DropdownButtonFormField<ReportRangePreset>>(
+        find.byType(DropdownButtonFormField<ReportRangePreset>),
+      )
+      .initialValue;
 }
 
 final class _FakeReportLoader implements ActivityReportLoader {

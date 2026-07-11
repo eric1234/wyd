@@ -154,6 +154,20 @@ void main() {
       expect(controller.state.dateRange!.endLocalDateExclusive, DateTime(2027));
     });
 
+    test('preserves the viewed date when switching presets', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final controller = ReportController(harness.reportService);
+      final today = harness.reportService.todayLocalDate();
+
+      await controller.open();
+      await controller.selectPreset(ReportRangePreset.week);
+      await controller.selectPreset(ReportRangePreset.day);
+
+      expect(controller.state.selection!.anchorDate, today);
+      expect(controller.state.dateRange!.startLocalDateInclusive, today);
+    });
+
     test('refreshForShow preserves selected day while already open', () async {
       final harness = await _Harness.create();
       addTearDown(harness.dispose);

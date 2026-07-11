@@ -9,12 +9,13 @@ enum ReportRangePreset { day, week, month, quarter, year }
 
 final class ReportSelection {
   ReportSelection({required this.preset, required DateTime anchorDate})
-    : anchorDate = _periodStart(preset, anchorDate);
+    : anchorDate = DateTime(anchorDate.year, anchorDate.month, anchorDate.day);
 
   final ReportRangePreset preset;
   final DateTime anchorDate;
 
-  ReportDateRange get dateRange => _dateRange(preset, anchorDate);
+  ReportDateRange get dateRange =>
+      _dateRange(preset, _periodStart(preset, anchorDate));
 }
 
 final class ReportState {
@@ -188,7 +189,7 @@ final class ReportController extends ChangeNotifier {
 }
 
 ReportSelection _shiftSelection(ReportSelection selection, int amount) {
-  final anchor = selection.anchorDate;
+  final anchor = _periodStart(selection.preset, selection.anchorDate);
   final shifted = switch (selection.preset) {
     ReportRangePreset.day => DateTime(
       anchor.year,

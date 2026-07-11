@@ -142,6 +142,7 @@ class _RangePresetSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<ReportRangePreset>(
+      key: ValueKey(value),
       initialValue: value,
       decoration: const InputDecoration(
         labelText: 'Range',

@@ -33,8 +33,13 @@ final class TrackingSession {
     required ActivitySource source,
     DateTime? createdAtUtc,
   }) {
+    final activeTask = timeline.activeTask;
+    final stopOccurredAtUtc =
+        activeTask != null && nowUtc.isBefore(activeTask.startedAtUtc)
+        ? activeTask.startedAtUtc
+        : nowUtc;
     final result = timeline.stopTask(
-      occurredAtUtc: nowUtc,
+      occurredAtUtc: stopOccurredAtUtc,
       source: source,
       createdAtUtc: createdAtUtc ?? nowUtc,
     );

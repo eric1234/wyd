@@ -92,6 +92,21 @@ void main() {
       expect(harness.store.events.last.createdAtUtc, harness.clock.current);
     });
 
+    test('stopTask does not place stop before active task start', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      final taskStartedAt = harness.clock.current;
+      final sleepAt = taskStartedAt.subtract(const Duration(minutes: 1));
+
+      final snapshot = await harness.service.stopTask(
+        source: ActivitySource.systemSleep,
+        occurredAtUtc: sleepAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(harness.store.events.last.occurredAtUtc, taskStartedAt);
+    });
+
     test(
       'nag timeout writes stop at prompt shown time and marks prompt expired',
       () async {

@@ -17,6 +17,7 @@ final class TrayMenuPresenter {
       ),
       const TrayMenuEntry(action: TrayMenuAction.report, label: 'Report'),
       const TrayMenuEntry(action: TrayMenuAction.settings, label: 'Settings'),
+      const TrayMenuEntry(action: TrayMenuAction.about, label: 'About'),
       const TrayMenuEntry(action: TrayMenuAction.exit, label: 'Exit'),
     ];
   }

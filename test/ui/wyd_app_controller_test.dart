@@ -20,7 +20,14 @@ void main() {
       expect(harness.tray.latestIconStatus, TrayIconStatus.idle);
       expect(harness.tray.initializedTooltip, 'No current task');
       expect(harness.tray.latestTooltip, 'No current task');
-      expect(harness.tray.latestEntries.last.action, TrayMenuAction.exit);
+      expect(harness.tray.latestEntries.map((entry) => entry.action), [
+        TrayMenuAction.updateTask,
+        TrayMenuAction.stopTask,
+        TrayMenuAction.report,
+        TrayMenuAction.settings,
+        TrayMenuAction.about,
+        TrayMenuAction.exit,
+      ]);
       expect(
         harness.tray.latestEntries
             .singleWhere((entry) => entry.action == TrayMenuAction.stopTask)
@@ -160,6 +167,23 @@ void main() {
 
       expect(harness.window.openedRoles, [WindowRole.quickEntry]);
       expect(harness.window.focusedRoles, [WindowRole.report]);
+    });
+
+    test('tray about opens the about window', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      await harness.controller.initialize();
+      harness.window.openedRoles.clear();
+
+      harness.tray.emitMenuAction(TrayMenuAction.about);
+      await _waitUntil(
+        () => harness.window.openedRoles.contains(WindowRole.about),
+      );
+
+      expect(harness.window.openedRoles, [WindowRole.about]);
+      expect(harness.window.openedConfigurations.last.title, 'About wyd');
+      expect(harness.window.openedConfigurations.last.resizable, isFalse);
+      expect(harness.controller.activeRole, WindowRole.quickEntry);
     });
 
     test('tray stop stops task and opens quick entry reminder', () async {
@@ -367,7 +391,14 @@ void main() {
       await harness.controller.openSettings();
       await harness.controller.showNagPrompt();
 
-      expect(harness.window.handles.keys, containsAll(WindowRole.values));
+      expect(
+        harness.window.handles.keys,
+        containsAll([
+          WindowRole.quickEntry,
+          WindowRole.report,
+          WindowRole.settings,
+        ]),
+      );
       expect(harness.controller.activeRole, WindowRole.quickEntry);
       expect(harness.controller.quickEntry.state.isOpen, isTrue);
     });

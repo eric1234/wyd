@@ -1,8 +1,10 @@
 import Cocoa
 import desktop_multi_window
 import FlutterMacOS
+import package_info_plus
 import screen_retriever_macos
 import system_idle_macos
+import url_launcher_macos
 import window_manager
 
 class MainFlutterWindow: NSWindow {
@@ -21,8 +23,10 @@ class MainFlutterWindow: NSWindow {
       // primary process window; registering it in child engines can steal tray
       // menu events from the controller that handles Report/Settings/Exit.
       FlutterMultiWindowPlugin.register(with: controller.registrar(forPlugin: "FlutterMultiWindowPlugin"))
+      FPPPackageInfoPlusPlugin.register(with: controller.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
       ScreenRetrieverMacosPlugin.register(with: controller.registrar(forPlugin: "ScreenRetrieverMacosPlugin"))
       SystemIdlePlugin.register(with: controller.registrar(forPlugin: "SystemIdlePlugin"))
+      UrlLauncherPlugin.register(with: controller.registrar(forPlugin: "UrlLauncherPlugin"))
       WindowManagerPlugin.register(with: controller.registrar(forPlugin: "WindowManagerPlugin"))
       appDelegate?.configureLaunchAtStartupChannel(for: controller)
     }

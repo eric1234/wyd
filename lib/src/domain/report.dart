@@ -30,14 +30,36 @@ final class ReportRow {
   final Duration duration;
 }
 
-final class DailyReport {
-  const DailyReport({
-    required this.localDate,
-    required this.totalDuration,
-    required this.rows,
-  });
+final class ReportDateRange {
+  ReportDateRange({
+    required DateTime startLocalDateInclusive,
+    required DateTime endLocalDateExclusive,
+  }) : startLocalDateInclusive = DateTime(
+         startLocalDateInclusive.year,
+         startLocalDateInclusive.month,
+         startLocalDateInclusive.day,
+       ),
+       endLocalDateExclusive = DateTime(
+         endLocalDateExclusive.year,
+         endLocalDateExclusive.month,
+         endLocalDateExclusive.day,
+       ) {
+    if (!this.endLocalDateExclusive.isAfter(this.startLocalDateInclusive)) {
+      throw ArgumentError.value(
+        endLocalDateExclusive,
+        'endLocalDateExclusive',
+        'must be after startLocalDateInclusive',
+      );
+    }
+  }
 
-  final DateTime localDate;
+  final DateTime startLocalDateInclusive;
+  final DateTime endLocalDateExclusive;
+}
+
+final class ActivityReport {
+  const ActivityReport({required this.totalDuration, required this.rows});
+
   final Duration totalDuration;
   final List<ReportRow> rows;
 }

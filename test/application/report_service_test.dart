@@ -26,7 +26,7 @@ void main() {
         ),
       );
 
-      final report = await harness.reportService.loadDailyReport(day);
+      final report = await harness.reportService.loadReport(_dayRange(day));
 
       expect(report.totalDuration, const Duration(minutes: 90));
       expect(report.rows.single.taskText, 'Write docs');
@@ -52,7 +52,7 @@ void main() {
           ),
         );
 
-        final report = await harness.reportService.loadDailyReport(day);
+        final report = await harness.reportService.loadReport(_dayRange(day));
 
         expect(report.totalDuration, const Duration(hours: 24));
         expect(report.rows.single.taskText, 'Long task');
@@ -67,10 +67,10 @@ void main() {
       final controller = ReportController(harness.reportService);
 
       await controller.open();
-      await controller.nextDay();
+      await controller.nextWindow();
 
       expect(
-        controller.state.selectedDate,
+        controller.state.selection!.anchorDate,
         harness.reportService.todayLocalDate(),
       );
       expect(controller.state.canGoNext, isFalse);
@@ -83,15 +83,75 @@ void main() {
       final today = harness.reportService.todayLocalDate();
 
       await controller.open();
-      await controller.previousDay();
+      await controller.previousWindow();
       expect(
-        controller.state.selectedDate,
+        controller.state.selection!.anchorDate,
         DateTime(today.year, today.month, today.day - 1),
       );
       expect(controller.state.canGoNext, isTrue);
 
-      await controller.nextDay();
-      expect(controller.state.selectedDate, today);
+      await controller.nextWindow();
+      expect(controller.state.selection!.anchorDate, today);
+    });
+
+    test('uses Monday-start weeks and navigates calendar weeks', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final controller = ReportController(harness.reportService);
+
+      await controller.open();
+      await controller.selectPreset(ReportRangePreset.week);
+
+      expect(
+        controller.state.dateRange!.startLocalDateInclusive,
+        DateTime(2025, 12, 29),
+      );
+      expect(
+        controller.state.dateRange!.endLocalDateExclusive,
+        DateTime(2026, 1, 5),
+      );
+      expect(controller.state.canGoNext, isFalse);
+
+      await controller.previousWindow();
+      expect(
+        controller.state.dateRange!.startLocalDateInclusive,
+        DateTime(2025, 12, 22),
+      );
+      expect(controller.state.canGoNext, isTrue);
+    });
+
+    test('resolves month quarter and year calendar ranges', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final controller = ReportController(harness.reportService);
+
+      await controller.open();
+      await controller.selectPreset(ReportRangePreset.month);
+      expect(
+        controller.state.dateRange!.startLocalDateInclusive,
+        DateTime(2026, 1),
+      );
+      expect(
+        controller.state.dateRange!.endLocalDateExclusive,
+        DateTime(2026, 2),
+      );
+
+      await controller.selectPreset(ReportRangePreset.quarter);
+      expect(
+        controller.state.dateRange!.startLocalDateInclusive,
+        DateTime(2026, 1),
+      );
+      expect(
+        controller.state.dateRange!.endLocalDateExclusive,
+        DateTime(2026, 4),
+      );
+
+      await controller.selectPreset(ReportRangePreset.year);
+      expect(
+        controller.state.dateRange!.startLocalDateInclusive,
+        DateTime(2026),
+      );
+      expect(controller.state.dateRange!.endLocalDateExclusive, DateTime(2027));
     });
 
     test('refreshForShow preserves selected day while already open', () async {
@@ -102,11 +162,11 @@ void main() {
       final previousDay = DateTime(today.year, today.month, today.day - 1);
 
       await controller.open();
-      await controller.previousDay();
+      await controller.previousWindow();
       controller.refreshForShow();
       await pumpEventQueue();
 
-      expect(controller.state.selectedDate, previousDay);
+      expect(controller.state.selection!.anchorDate, previousDay);
       expect(controller.state.isOpen, isTrue);
     });
 
@@ -117,12 +177,12 @@ void main() {
       final today = harness.reportService.todayLocalDate();
 
       await controller.open();
-      await controller.previousDay();
+      await controller.previousWindow();
       controller.close();
       controller.refreshForShow();
       await pumpEventQueue();
 
-      expect(controller.state.selectedDate, today);
+      expect(controller.state.selection!.anchorDate, today);
       expect(controller.state.isOpen, isTrue);
     });
 
@@ -152,26 +212,32 @@ void main() {
     });
 
     test('ignores stale date load results', () async {
-      final loader = _DelayedDailyReportLoader(DateTime(2026, 1, 3));
+      final loader = _DelayedActivityReportLoader(DateTime(2026, 1, 3));
       final controller = ReportController(loader);
       final firstDate = DateTime(2026, 1, 1);
       final secondDate = DateTime(2026, 1, 2);
 
-      final firstLoad = controller.loadDate(firstDate);
-      final secondLoad = controller.loadDate(secondDate);
+      final firstLoad = controller.loadSelection(
+        ReportSelection(preset: ReportRangePreset.day, anchorDate: firstDate),
+      );
+      final secondLoad = controller.loadSelection(
+        ReportSelection(preset: ReportRangePreset.day, anchorDate: secondDate),
+      );
 
-      expect(loader.requests.map((request) => request.localDate), [
-        firstDate,
-        secondDate,
-      ]);
+      expect(
+        loader.requests.map(
+          (request) => request.dateRange.startLocalDateInclusive,
+        ),
+        [firstDate, secondDate],
+      );
       loader.complete(1, _report(secondDate, 'Second result'));
       await secondLoad;
-      expect(controller.state.selectedDate, secondDate);
+      expect(controller.state.selection!.anchorDate, secondDate);
       expect(controller.state.report!.rows.single.taskText, 'Second result');
 
       loader.complete(0, _report(firstDate, 'Stale result'));
       await firstLoad;
-      expect(controller.state.selectedDate, secondDate);
+      expect(controller.state.selection!.anchorDate, secondDate);
       expect(controller.state.report!.rows.single.taskText, 'Second result');
     });
   });
@@ -215,8 +281,8 @@ final class _FakeClock implements Clock {
   DateTime nowUtc() => current;
 }
 
-final class _DelayedDailyReportLoader implements DailyReportLoader {
-  _DelayedDailyReportLoader(this.today);
+final class _DelayedActivityReportLoader implements ActivityReportLoader {
+  _DelayedActivityReportLoader(this.today);
 
   final DateTime today;
   final List<_ReportRequest> requests = [];
@@ -225,27 +291,26 @@ final class _DelayedDailyReportLoader implements DailyReportLoader {
   DateTime todayLocalDate() => today;
 
   @override
-  Future<DailyReport> loadDailyReport(DateTime localDate) {
-    final request = _ReportRequest(localDate);
+  Future<ActivityReport> loadReport(ReportDateRange dateRange) {
+    final request = _ReportRequest(dateRange);
     requests.add(request);
     return request.completer.future;
   }
 
-  void complete(int index, DailyReport report) {
+  void complete(int index, ActivityReport report) {
     requests[index].completer.complete(report);
   }
 }
 
 final class _ReportRequest {
-  _ReportRequest(this.localDate);
+  _ReportRequest(this.dateRange);
 
-  final DateTime localDate;
-  final Completer<DailyReport> completer = Completer<DailyReport>();
+  final ReportDateRange dateRange;
+  final Completer<ActivityReport> completer = Completer<ActivityReport>();
 }
 
-DailyReport _report(DateTime localDate, String taskText) {
-  return DailyReport(
-    localDate: localDate,
+ActivityReport _report(DateTime localDate, String taskText) {
+  return ActivityReport(
     totalDuration: const Duration(minutes: 1),
     rows: [
       ReportRow(
@@ -256,3 +321,8 @@ DailyReport _report(DateTime localDate, String taskText) {
     ],
   );
 }
+
+ReportDateRange _dayRange(DateTime date) => ReportDateRange(
+  startLocalDateInclusive: date,
+  endLocalDateExclusive: DateTime(date.year, date.month, date.day + 1),
+);

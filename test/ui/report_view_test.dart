@@ -24,8 +24,7 @@ void main() {
 
   testWidgets('shows daily total and rows', (tester) async {
     final loader = _FakeReportLoader(
-      report: DailyReport(
-        localDate: DateTime(2026, 1, 2),
+      report: ActivityReport(
         totalDuration: const Duration(minutes: 90),
         rows: const [
           ReportRow(
@@ -61,8 +60,7 @@ void main() {
       Size(configuration.width, configuration.height),
     );
     final loader = _FakeReportLoader(
-      report: DailyReport(
-        localDate: DateTime(2026, 1, 2),
+      report: ActivityReport(
         totalDuration: const Duration(minutes: 90),
         rows: const [
           ReportRow(
@@ -107,7 +105,28 @@ void main() {
     }
   });
 
-  testWidgets('previous and next buttons navigate dates', (tester) async {
+  testWidgets('selects a Monday-start weekly report range', (tester) async {
+    final loader = _FakeReportLoader();
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: ReportView(controller: controller)),
+      );
+
+      await tester.tap(find.byType(DropdownButtonFormField<ReportRangePreset>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Week').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('2025-12-29 - 2026-01-02'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('previous and next buttons navigate date ranges', (tester) async {
     final loader = _FakeReportLoader();
     final controller = ReportController(loader);
     await controller.open();
@@ -148,8 +167,7 @@ void main() {
 
   test('refreshForShow reloads a fresh report snapshot', () async {
     final loader = _FakeReportLoader(
-      report: DailyReport(
-        localDate: DateTime(2026, 1, 2),
+      report: ActivityReport(
         totalDuration: const Duration(minutes: 30),
         rows: const [
           ReportRow(
@@ -162,8 +180,7 @@ void main() {
     );
     final controller = ReportController(loader);
     await controller.open();
-    loader.report = DailyReport(
-      localDate: DateTime(2026, 1, 2),
+    loader.report = ActivityReport(
       totalDuration: const Duration(minutes: 45),
       rows: const [
         ReportRow(
@@ -204,26 +221,22 @@ Widget _scaledMaterialApp({required Widget home}) {
   );
 }
 
-final class _FakeReportLoader implements DailyReportLoader {
+final class _FakeReportLoader implements ActivityReportLoader {
   _FakeReportLoader({this.report, this.error});
 
-  DailyReport? report;
+  ActivityReport? report;
   Object? error;
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);
 
   @override
-  Future<DailyReport> loadDailyReport(DateTime localDate) async {
+  Future<ActivityReport> loadReport(ReportDateRange dateRange) async {
     final error = this.error;
     if (error != null) {
       throw error;
     }
     return report ??
-        DailyReport(
-          localDate: localDate,
-          totalDuration: Duration.zero,
-          rows: const [],
-        );
+        ActivityReport(totalDuration: Duration.zero, rows: const []);
   }
 }

@@ -124,27 +124,17 @@ final class ActivityTimeline {
     return segments;
   }
 
-  DailyReport buildDailyReport({
-    required DateTime localDate,
+  ActivityReport buildReport({
+    required ReportDateRange dateRange,
     required DateTime nowUtc,
   }) {
-    final selectedLocalDate = DateTime(
-      localDate.year,
-      localDate.month,
-      localDate.day,
-    );
-    final nextLocalDate = DateTime(
-      localDate.year,
-      localDate.month,
-      localDate.day + 1,
-    );
-    final dayStartUtc = selectedLocalDate.toUtc();
-    final dayEndUtc = nextLocalDate.toUtc();
+    final rangeStartUtc = dateRange.startLocalDateInclusive.toUtc();
+    final rangeEndUtc = dateRange.endLocalDateExclusive.toUtc();
     final accumulators = <String, _ReportAccumulator>{};
 
     for (final segment in deriveSegments(nowUtc: nowUtc)) {
-      final overlapStart = _maxDate(segment.startedAtUtc, dayStartUtc);
-      final overlapEnd = _minDate(segment.endedAtUtc, dayEndUtc);
+      final overlapStart = _maxDate(segment.startedAtUtc, rangeStartUtc);
+      final overlapEnd = _minDate(segment.endedAtUtc, rangeEndUtc);
 
       if (!overlapEnd.isAfter(overlapStart)) {
         continue;
@@ -192,11 +182,7 @@ final class ActivityTimeline {
       (total, row) => total + row.duration,
     );
 
-    return DailyReport(
-      localDate: selectedLocalDate,
-      totalDuration: totalDuration,
-      rows: rows,
-    );
+    return ActivityReport(totalDuration: totalDuration, rows: rows);
   }
 
   List<AutocompleteSuggestion> autocompleteSuggestions({

@@ -233,7 +233,8 @@ final class _FailingSettingsSaveTransaction implements AppTransaction {
   _FailingSettingsSaveTransaction(_FailingSettingsSaveRunner runner)
     : activityLog = const _EmptyActivityLogRepository(),
       runtimeState = _MemoryRuntimeStateRepository(runner),
-      settings = _FailingSettingsRepository(runner);
+      settings = _FailingSettingsRepository(runner),
+      taskTags = const _EmptyTaskTagRepository();
 
   @override
   final ActivityLogRepository activityLog;
@@ -243,6 +244,9 @@ final class _FailingSettingsSaveTransaction implements AppTransaction {
 
   @override
   final SettingsRepository settings;
+
+  @override
+  final TaskTagRepository taskTags;
 }
 
 final class _EmptyActivityLogRepository implements ActivityLogRepository {
@@ -271,6 +275,27 @@ final class _EmptyActivityLogRepository implements ActivityLogRepository {
     required DateTime fromUtc,
     required DateTime throughUtc,
   }) async => const [];
+}
+
+final class _EmptyTaskTagRepository implements TaskTagRepository {
+  const _EmptyTaskTagRepository();
+
+  @override
+  Future<Map<String, List<TaskTag>>> tagsForTasks(
+    Iterable<String> taskTextNormalizedValues,
+  ) async => const {};
+
+  @override
+  Future<TaskTag> addTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) async => TaskTag.fromInput(tagText);
+
+  @override
+  Future<void> removeTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) async {}
 }
 
 final class _MemoryRuntimeStateRepository implements RuntimeStateRepository {

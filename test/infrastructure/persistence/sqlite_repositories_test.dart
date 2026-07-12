@@ -24,6 +24,7 @@ void main() {
       expect(tables.map((row) => row['name']), contains('activity_log'));
       expect(tables.map((row) => row['name']), contains('app_state'));
       expect(tables.map((row) => row['name']), contains('settings'));
+      expect(tables.map((row) => row['name']), contains('task_tags'));
       expect(
         indexes.map((row) => row['name']),
         contains('idx_activity_log_occurred_id'),
@@ -31,6 +32,10 @@ void main() {
       expect(
         indexes.map((row) => row['name']),
         contains('idx_activity_log_event_type_occurred'),
+      );
+      expect(
+        indexes.map((row) => row['name']),
+        contains('idx_task_tags_tag_text_normalized'),
       );
     });
 
@@ -269,6 +274,46 @@ void main() {
           'start_at_login': 0,
         });
       });
+      await expectConstraintFailure(() async {
+        await database.database.insert('task_tags', {
+          'task_text_normalized': '',
+          'tag_text': 'Bug',
+          'tag_text_normalized': 'bug',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('task_tags', {
+          'task_text_normalized': 'fix bug',
+          'tag_text': '',
+          'tag_text_normalized': 'bug',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('task_tags', {
+          'task_text_normalized': 'fix bug',
+          'tag_text': ''.padRight(TaskTag.maxLength + 1, 'a'),
+          'tag_text_normalized': 'bug',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('task_tags', {
+          'task_text_normalized': 'fix bug',
+          'tag_text': 'Bug',
+          'tag_text_normalized': '',
+          'created_at_utc': timestamp,
+        });
+      });
+      await expectConstraintFailure(() async {
+        await database.database.insert('task_tags', {
+          'task_text_normalized': 'fix bug',
+          'tag_text': 'Bug',
+          'tag_text_normalized': ''.padRight(TaskTag.maxLength + 1, 'a'),
+          'created_at_utc': timestamp,
+        });
+      });
     });
 
     test('fails clearly when opening a newer schema version', () async {
@@ -319,6 +364,11 @@ void main() {
         final repository = SqliteSettingsRepository(database.database);
 
         expect((await repository.read()).autocompleteLookbackDays, 30);
+
+        final tables = await database.database.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type = 'table'",
+        );
+        expect(tables.map((row) => row['name']), contains('task_tags'));
 
         await repository.save(const AppSettings(autocompleteLookbackDays: 365));
 
@@ -551,6 +601,98 @@ void main() {
     });
   });
 
+  group('SqliteTaskTagRepository', () {
+    late AppDatabase database;
+    late SqliteTaskTagRepository repository;
+
+    setUp(() async {
+      database = await AppDatabase.openInMemory(
+        databaseFactory: databaseFactoryFfi,
+      );
+      repository = SqliteTaskTagRepository(
+        database.database,
+        nowUtc: () => DateTime.utc(2026, 1, 1, 9),
+      );
+    });
+
+    tearDown(() async {
+      await database.close();
+    });
+
+    test('adds, reads, and removes tags for a task', () async {
+      final tag = await repository.addTag(
+        taskTextNormalized: 'fix login',
+        tagText: 'Bug',
+      );
+
+      expect(tag, TaskTag.fromInput('Bug'));
+      expect(await repository.tagsForTasks(['fix login']), {
+        'fix login': [TaskTag.fromInput('Bug')],
+      });
+
+      await repository.removeTag(
+        taskTextNormalized: 'fix login',
+        tagTextNormalized: 'bug',
+      );
+
+      expect(await repository.tagsForTasks(['fix login']), isEmpty);
+    });
+
+    test('returns multiple tags in normalized order', () async {
+      await repository.addTag(taskTextNormalized: 'fix login', tagText: 'Fire');
+      await repository.addTag(taskTextNormalized: 'fix login', tagText: 'Bug');
+
+      final tagsByTask = await repository.tagsForTasks(['fix login']);
+
+      expect(tagsByTask['fix login'], [
+        TaskTag.fromInput('Bug'),
+        TaskTag.fromInput('Fire'),
+      ]);
+    });
+
+    test(
+      'deduplicates normalized tags and returns stored display text',
+      () async {
+        await repository.addTag(
+          taskTextNormalized: 'fix login',
+          tagText: 'Bug',
+        );
+
+        final tag = await repository.addTag(
+          taskTextNormalized: 'fix login',
+          tagText: '  bug  ',
+        );
+
+        expect(tag.text, 'Bug');
+        expect((await repository.tagsForTasks(['fix login']))['fix login'], [
+          TaskTag.fromInput('Bug'),
+        ]);
+      },
+    );
+
+    test('batch lookup only returns requested tasks', () async {
+      await repository.addTag(taskTextNormalized: 'fix login', tagText: 'Bug');
+      await repository.addTag(
+        taskTextNormalized: 'write docs',
+        tagText: 'Docs',
+      );
+      await repository.addTag(
+        taskTextNormalized: 'support call',
+        tagText: 'Support',
+      );
+
+      final tagsByTask = await repository.tagsForTasks([
+        'write docs',
+        'fix login',
+      ]);
+
+      expect(tagsByTask.keys, unorderedEquals(['write docs', 'fix login']));
+      expect(tagsByTask['fix login'], [TaskTag.fromInput('Bug')]);
+      expect(tagsByTask['write docs'], [TaskTag.fromInput('Docs')]);
+      expect(tagsByTask.containsKey('support call'), isFalse);
+    });
+  });
+
   group('SqliteTransactionRunner', () {
     test('rolls back writes when a transaction fails', () async {
       final database = await AppDatabase.openInMemory(
@@ -575,6 +717,28 @@ void main() {
 
       expect(await repository.allEvents(), isEmpty);
     });
+
+    test('rolls back tag writes when a transaction fails', () async {
+      final database = await AppDatabase.openInMemory(
+        databaseFactory: databaseFactoryFfi,
+      );
+      addTearDown(database.close);
+      final runner = SqliteTransactionRunner(database);
+      final repository = SqliteTaskTagRepository(database.database);
+
+      await expectLater(
+        runner.run<void>((transaction) async {
+          await transaction.taskTags.addTag(
+            taskTextNormalized: 'rolled back task',
+            tagText: 'Bug',
+          );
+          throw StateError('rollback');
+        }),
+        throwsStateError,
+      );
+
+      expect(await repository.tagsForTasks(['rolled back task']), isEmpty);
+    });
   });
 }
 
@@ -585,6 +749,53 @@ Future<void> _createVersion1Database(String databasePath) async {
     options: OpenDatabaseOptions(
       version: 1,
       onCreate: (database, version) async {
+        await database.execute('''
+CREATE TABLE activity_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurred_at_utc TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('start_task', 'switch_task', 'stop_task')),
+  task_text TEXT,
+  task_text_normalized TEXT,
+  source TEXT NOT NULL CHECK(source IN (
+    'manual_submit',
+    'manual_stop',
+    'nag_timeout',
+    'system_lock',
+    'system_sleep',
+    'exit',
+    'recovery'
+  )),
+  created_at_utc TEXT NOT NULL,
+  CHECK (
+    (event_type = 'stop_task' AND task_text IS NULL AND task_text_normalized IS NULL)
+    OR
+    (event_type IN ('start_task', 'switch_task') AND task_text IS NOT NULL AND task_text_normalized IS NOT NULL)
+  )
+)
+''');
+        await database.execute('''
+CREATE INDEX idx_activity_log_occurred_id
+ON activity_log (occurred_at_utc, id)
+''');
+        await database.execute('''
+CREATE INDEX idx_activity_log_event_type_occurred
+ON activity_log (event_type, occurred_at_utc)
+''');
+        await database.execute('''
+CREATE TABLE app_state (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  last_confirmation_at_utc TEXT,
+  pending_prompt_shown_at_utc TEXT,
+  pending_prompt_expired INTEGER NOT NULL DEFAULT 0 CHECK(pending_prompt_expired IN (0, 1)),
+  clean_shutdown INTEGER NOT NULL DEFAULT 1 CHECK(clean_shutdown IN (0, 1)),
+  CHECK (pending_prompt_expired = 0 OR pending_prompt_shown_at_utc IS NOT NULL)
+)
+''');
+        await database.insert('app_state', {
+          'id': 1,
+          'pending_prompt_expired': 0,
+          'clean_shutdown': 1,
+        });
         await database.execute('''
 CREATE TABLE settings (
   id INTEGER PRIMARY KEY CHECK(id = 1),

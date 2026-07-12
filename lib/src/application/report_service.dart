@@ -6,6 +6,16 @@ abstract interface class ActivityReportLoader {
   DateTime todayLocalDate();
 
   Future<ActivityReport> loadReport(ReportDateRange dateRange);
+
+  Future<TaskTag> addTaskTag({
+    required String taskTextNormalized,
+    required String tagText,
+  });
+
+  Future<void> removeTaskTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  });
 }
 
 final class ReportService implements ActivityReportLoader {
@@ -45,10 +55,52 @@ final class ReportService implements ActivityReportLoader {
         fromUtc: rangeStartUtc,
         throughUtc: reportEndUtc,
       );
-      return ActivityTimeline([
+      final report = ActivityTimeline([
         ?priorEvent,
         ...events,
       ]).buildReport(dateRange: dateRange, nowUtc: reportEndUtc);
+      final tagsByTask = await transaction.taskTags.tagsForTasks(
+        report.rows.map((row) => row.taskTextNormalized),
+      );
+
+      return ActivityReport(
+        totalDuration: report.totalDuration,
+        rows: [
+          for (final row in report.rows)
+            ReportRow(
+              taskText: row.taskText,
+              taskTextNormalized: row.taskTextNormalized,
+              duration: row.duration,
+              tags: tagsByTask[row.taskTextNormalized] ?? const [],
+            ),
+        ],
+      );
+    });
+  }
+
+  @override
+  Future<TaskTag> addTaskTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) {
+    return _transactions.run((transaction) {
+      return transaction.taskTags.addTag(
+        taskTextNormalized: taskTextNormalized,
+        tagText: tagText,
+      );
+    });
+  }
+
+  @override
+  Future<void> removeTaskTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) {
+    return _transactions.run((transaction) {
+      return transaction.taskTags.removeTag(
+        taskTextNormalized: taskTextNormalized,
+        tagTextNormalized: tagTextNormalized,
+      );
     });
   }
 }

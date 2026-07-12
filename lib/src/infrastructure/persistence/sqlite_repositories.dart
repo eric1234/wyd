@@ -190,11 +190,109 @@ final class SqliteSettingsRepository implements SettingsRepository {
   }
 }
 
+final class SqliteTaskTagRepository implements TaskTagRepository {
+  const SqliteTaskTagRepository(this._executor, {DateTime Function()? nowUtc})
+    : _nowUtc = nowUtc;
+
+  final DatabaseExecutor _executor;
+  final DateTime Function()? _nowUtc;
+
+  @override
+  Future<Map<String, List<TaskTag>>> tagsForTasks(
+    Iterable<String> taskTextNormalizedValues,
+  ) async {
+    final taskKeys = taskTextNormalizedValues.toSet().toList();
+    if (taskKeys.isEmpty) {
+      return const {};
+    }
+
+    final placeholders = List.filled(taskKeys.length, '?').join(', ');
+    final rows = await _executor.query(
+      'task_tags',
+      where: 'task_text_normalized IN ($placeholders)',
+      whereArgs: taskKeys,
+      orderBy: 'task_text_normalized ASC, tag_text_normalized ASC',
+    );
+    final tagsByTask = <String, List<TaskTag>>{};
+    for (final row in rows) {
+      final taskKey = row['task_text_normalized'] as String;
+      tagsByTask.putIfAbsent(taskKey, () => []).add(taskTagFromRow(row));
+    }
+
+    return tagsByTask;
+  }
+
+  @override
+  Future<TaskTag> addTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) async {
+    if (taskTextNormalized.isEmpty) {
+      throw ArgumentError.value(
+        taskTextNormalized,
+        'taskTextNormalized',
+        'Task key cannot be empty.',
+      );
+    }
+
+    final tag = TaskTag.fromInput(tagText);
+    await _executor.insert(
+      'task_tags',
+      taskTagToRow(
+        taskTextNormalized: taskTextNormalized,
+        tag: tag,
+        createdAtUtc: (_nowUtc?.call() ?? DateTime.now()).toUtc(),
+      ),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    final storedTag = await _tagForTask(
+      taskTextNormalized: taskTextNormalized,
+      tagTextNormalized: tag.normalized,
+    );
+    if (storedTag == null) {
+      throw StateError('Failed to save task tag.');
+    }
+
+    return storedTag;
+  }
+
+  @override
+  Future<void> removeTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) async {
+    await _executor.delete(
+      'task_tags',
+      where: 'task_text_normalized = ? AND tag_text_normalized = ?',
+      whereArgs: [taskTextNormalized, tagTextNormalized],
+    );
+  }
+
+  Future<TaskTag?> _tagForTask({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) async {
+    final rows = await _executor.query(
+      'task_tags',
+      where: 'task_text_normalized = ? AND tag_text_normalized = ?',
+      whereArgs: [taskTextNormalized, tagTextNormalized],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    return taskTagFromRow(rows.single);
+  }
+}
+
 final class SqliteAppTransaction implements AppTransaction {
   SqliteAppTransaction(DatabaseExecutor executor)
     : activityLog = SqliteActivityLogRepository(executor),
       runtimeState = SqliteRuntimeStateRepository(executor),
-      settings = SqliteSettingsRepository(executor);
+      settings = SqliteSettingsRepository(executor),
+      taskTags = SqliteTaskTagRepository(executor);
 
   @override
   final ActivityLogRepository activityLog;
@@ -204,6 +302,9 @@ final class SqliteAppTransaction implements AppTransaction {
 
   @override
   final SettingsRepository settings;
+
+  @override
+  final TaskTagRepository taskTags;
 }
 
 final class SqliteTransactionRunner implements TransactionRunner {

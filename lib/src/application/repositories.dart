@@ -32,12 +32,30 @@ abstract interface class SettingsRepository {
   Future<void> save(AppSettings settings);
 }
 
+abstract interface class TaskTagRepository {
+  Future<Map<String, List<TaskTag>>> tagsForTasks(
+    Iterable<String> taskTextNormalizedValues,
+  );
+
+  Future<TaskTag> addTag({
+    required String taskTextNormalized,
+    required String tagText,
+  });
+
+  Future<void> removeTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  });
+}
+
 abstract interface class AppTransaction {
   ActivityLogRepository get activityLog;
 
   RuntimeStateRepository get runtimeState;
 
   SettingsRepository get settings;
+
+  TaskTagRepository get taskTags;
 }
 
 abstract interface class TransactionRunner {

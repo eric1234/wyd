@@ -486,14 +486,17 @@ final class _FakeClock implements Clock {
 final class _MemoryStore {
   _MemoryStore({
     List<ActivityLogEvent>? events,
+    Map<String, List<TaskTag>>? taskTags,
     RuntimeState? runtimeState,
     AppSettings? settings,
     this.nextId = 1,
   }) : events = events ?? [],
+       taskTags = taskTags ?? {},
        runtimeState = runtimeState ?? RuntimeState(cleanShutdown: false),
        settings = settings ?? AppSettings.defaults;
 
   List<ActivityLogEvent> events;
+  Map<String, List<TaskTag>> taskTags;
   RuntimeState runtimeState;
   AppSettings settings;
   int nextId;
@@ -501,6 +504,9 @@ final class _MemoryStore {
   _MemoryStore copy() {
     return _MemoryStore(
       events: List<ActivityLogEvent>.of(events),
+      taskTags: taskTags.map(
+        (key, value) => MapEntry(key, List<TaskTag>.of(value)),
+      ),
       runtimeState: runtimeState,
       settings: settings,
       nextId: nextId,
@@ -509,6 +515,7 @@ final class _MemoryStore {
 
   void replaceWith(_MemoryStore other) {
     events = other.events;
+    taskTags = other.taskTags;
     runtimeState = other.runtimeState;
     settings = other.settings;
     nextId = other.nextId;
@@ -554,7 +561,8 @@ final class _MemoryTransaction implements AppTransaction {
         store,
         failOnSave: failOnRuntimeSave,
       ),
-      settings = _MemorySettingsRepository(store);
+      settings = _MemorySettingsRepository(store),
+      taskTags = _MemoryTaskTagRepository(store);
 
   @override
   final ActivityLogRepository activityLog;
@@ -564,6 +572,9 @@ final class _MemoryTransaction implements AppTransaction {
 
   @override
   final SettingsRepository settings;
+
+  @override
+  final TaskTagRepository taskTags;
 }
 
 final class _MemoryActivityLogRepository implements ActivityLogRepository {
@@ -656,5 +667,48 @@ final class _MemorySettingsRepository implements SettingsRepository {
   @override
   Future<void> save(AppSettings settings) async {
     _store.settings = settings;
+  }
+}
+
+final class _MemoryTaskTagRepository implements TaskTagRepository {
+  _MemoryTaskTagRepository(this._store);
+
+  final _MemoryStore _store;
+
+  @override
+  Future<Map<String, List<TaskTag>>> tagsForTasks(
+    Iterable<String> taskTextNormalizedValues,
+  ) async {
+    return {
+      for (final taskKey in taskTextNormalizedValues)
+        if (_store.taskTags.containsKey(taskKey))
+          taskKey: List<TaskTag>.of(_store.taskTags[taskKey]!),
+    };
+  }
+
+  @override
+  Future<TaskTag> addTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) async {
+    final tag = TaskTag.fromInput(tagText);
+    final tags = _store.taskTags.putIfAbsent(taskTextNormalized, () => []);
+    final existing = tags.where((item) => item.normalized == tag.normalized);
+    if (existing.isNotEmpty) {
+      return existing.single;
+    }
+    tags.add(tag);
+    tags.sort((left, right) => left.normalized.compareTo(right.normalized));
+    return tag;
+  }
+
+  @override
+  Future<void> removeTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) async {
+    _store.taskTags[taskTextNormalized]?.removeWhere(
+      (tag) => tag.normalized == tagTextNormalized,
+    );
   }
 }

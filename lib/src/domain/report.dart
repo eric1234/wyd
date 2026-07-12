@@ -1,3 +1,5 @@
+import 'task_tag.dart';
+
 final class ReportSegment {
   ReportSegment({
     required this.taskText,
@@ -23,11 +25,13 @@ final class ReportRow {
     required this.taskText,
     required this.taskTextNormalized,
     required this.duration,
+    this.tags = const [],
   });
 
   final String taskText;
   final String taskTextNormalized;
   final Duration duration;
+  final List<TaskTag> tags;
 }
 
 final class ReportDateRange {

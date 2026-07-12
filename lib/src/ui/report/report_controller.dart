@@ -177,6 +177,40 @@ final class ReportController extends ChangeNotifier {
     }
   }
 
+  Future<TaskTag> addTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) async {
+    final tag = await _service.addTaskTag(
+      taskTextNormalized: taskTextNormalized,
+      tagText: tagText,
+    );
+    _updateTagsForTask(taskTextNormalized, (tags) {
+      return _sortTags([
+        for (final existing in tags)
+          if (existing.normalized != tag.normalized) existing,
+        tag,
+      ]);
+    });
+    return tag;
+  }
+
+  Future<void> removeTag({
+    required String taskTextNormalized,
+    required TaskTag tag,
+  }) async {
+    await _service.removeTaskTag(
+      taskTextNormalized: taskTextNormalized,
+      tagTextNormalized: tag.normalized,
+    );
+    _updateTagsForTask(taskTextNormalized, (tags) {
+      return [
+        for (final existing in tags)
+          if (existing.normalized != tag.normalized) existing,
+      ];
+    });
+  }
+
   ReportSelection _todaySelection() => ReportSelection(
     preset: ReportRangePreset.day,
     anchorDate: _service.todayLocalDate(),
@@ -185,6 +219,41 @@ final class ReportController extends ChangeNotifier {
   void _setState(ReportState state) {
     _state = state;
     notifyListeners();
+  }
+
+  void _updateTagsForTask(
+    String taskTextNormalized,
+    List<TaskTag> Function(List<TaskTag> tags) update,
+  ) {
+    final report = _state.report;
+    if (report == null) {
+      return;
+    }
+
+    _setState(
+      _state.copyWith(
+        report: ActivityReport(
+          totalDuration: report.totalDuration,
+          rows: [
+            for (final row in report.rows)
+              if (row.taskTextNormalized == taskTextNormalized)
+                ReportRow(
+                  taskText: row.taskText,
+                  taskTextNormalized: row.taskTextNormalized,
+                  duration: row.duration,
+                  tags: update(row.tags),
+                )
+              else
+                row,
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<TaskTag> _sortTags(List<TaskTag> tags) {
+    return tags.toList()
+      ..sort((left, right) => left.normalized.compareTo(right.normalized));
   }
 }
 

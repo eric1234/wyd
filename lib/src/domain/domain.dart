@@ -6,4 +6,5 @@ export 'lifecycle.dart';
 export 'report.dart';
 export 'runtime_state.dart';
 export 'settings.dart';
+export 'task_tag.dart';
 export 'task_text.dart';

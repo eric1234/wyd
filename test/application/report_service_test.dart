@@ -33,6 +33,70 @@ void main() {
       expect(report.rows.single.duration, const Duration(minutes: 90));
     });
 
+    test('loads task tags with report rows', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final day = DateTime(2026, 1, 2);
+      await harness.activityLog.append(
+        ActivityLogEvent.startTask(
+          occurredAtUtc: DateTime(2026, 1, 2, 9).toUtc(),
+          taskText: 'Write docs',
+        ),
+      );
+      await harness.activityLog.append(
+        ActivityLogEvent.switchTask(
+          occurredAtUtc: DateTime(2026, 1, 2, 10).toUtc(),
+          taskText: 'write   docs',
+        ),
+      );
+      await harness.taskTags.addTag(
+        taskTextNormalized: 'write docs',
+        tagText: 'Docs',
+      );
+
+      final report = await harness.reportService.loadReport(_dayRange(day));
+
+      expect(report.rows, hasLength(1));
+      expect(report.rows.single.taskTextNormalized, 'write docs');
+      expect(report.rows.single.tags, [TaskTag.fromInput('Docs')]);
+    });
+
+    test('adds and removes tags through the report service', () async {
+      final harness = await _Harness.create();
+      addTearDown(harness.dispose);
+      final day = DateTime(2026, 1, 2);
+      await harness.activityLog.append(
+        ActivityLogEvent.startTask(
+          occurredAtUtc: DateTime(2026, 1, 2, 9).toUtc(),
+          taskText: 'Fix bug',
+        ),
+      );
+
+      await harness.reportService.addTaskTag(
+        taskTextNormalized: 'fix bug',
+        tagText: 'Bug',
+      );
+
+      expect(
+        (await harness.reportService.loadReport(
+          _dayRange(day),
+        )).rows.single.tags,
+        [TaskTag.fromInput('Bug')],
+      );
+
+      await harness.reportService.removeTaskTag(
+        taskTextNormalized: 'fix bug',
+        tagTextNormalized: 'bug',
+      );
+
+      expect(
+        (await harness.reportService.loadReport(
+          _dayRange(day),
+        )).rows.single.tags,
+        isEmpty,
+      );
+    });
+
     test(
       'derives reports from bounded events around the selected day',
       () async {
@@ -254,6 +318,50 @@ void main() {
       expect(controller.state.selection!.anchorDate, secondDate);
       expect(controller.state.report!.rows.single.taskText, 'Second result');
     });
+
+    test('updates current report tags after add and remove', () async {
+      final client = _StaticActivityReportLoader(
+        report: _report(DateTime(2026, 1, 2), 'Fix bug'),
+      );
+      final controller = ReportController(client);
+      addTearDown(controller.dispose);
+      await controller.open();
+
+      final tag = await controller.addTag(
+        taskTextNormalized: 'fix bug',
+        tagText: 'Bug',
+      );
+
+      expect(tag, TaskTag.fromInput('Bug'));
+      expect(controller.state.report!.rows.single.tags, [
+        TaskTag.fromInput('Bug'),
+      ]);
+
+      await controller.removeTag(taskTextNormalized: 'fix bug', tag: tag);
+
+      expect(controller.state.report!.rows.single.tags, isEmpty);
+    });
+
+    test(
+      'tag operation failure does not replace report with error state',
+      () async {
+        final client = _StaticActivityReportLoader(
+          report: _report(DateTime(2026, 1, 2), 'Fix bug'),
+          addError: StateError('tag failed'),
+        );
+        final controller = ReportController(client);
+        addTearDown(controller.dispose);
+        await controller.open();
+
+        await expectLater(
+          controller.addTag(taskTextNormalized: 'fix bug', tagText: 'Bug'),
+          throwsStateError,
+        );
+
+        expect(controller.state.errorMessage, isNull);
+        expect(controller.state.report!.rows.single.taskText, 'Fix bug');
+      },
+    );
   });
 }
 
@@ -261,11 +369,13 @@ final class _Harness {
   _Harness({
     required this.database,
     required this.activityLog,
+    required this.taskTags,
     required this.reportService,
   });
 
   final AppDatabase database;
   final SqliteActivityLogRepository activityLog;
+  final SqliteTaskTagRepository taskTags;
   final ReportService reportService;
 
   static Future<_Harness> create() async {
@@ -279,6 +389,7 @@ final class _Harness {
     return _Harness(
       database: database,
       activityLog: SqliteActivityLogRepository(database.database),
+      taskTags: SqliteTaskTagRepository(database.database),
       reportService: reportService,
     );
   }
@@ -311,9 +422,56 @@ final class _DelayedActivityReportLoader implements ActivityReportLoader {
     return request.completer.future;
   }
 
+  @override
+  Future<TaskTag> addTaskTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> removeTaskTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) {
+    throw UnimplementedError();
+  }
+
   void complete(int index, ActivityReport report) {
     requests[index].completer.complete(report);
   }
+}
+
+final class _StaticActivityReportLoader implements ActivityReportLoader {
+  _StaticActivityReportLoader({required this.report, this.addError});
+
+  final ActivityReport report;
+  final Object? addError;
+
+  @override
+  DateTime todayLocalDate() => DateTime(2026, 1, 2);
+
+  @override
+  Future<ActivityReport> loadReport(ReportDateRange dateRange) async => report;
+
+  @override
+  Future<TaskTag> addTaskTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) async {
+    final error = addError;
+    if (error != null) {
+      throw error;
+    }
+    return TaskTag.fromInput(tagText);
+  }
+
+  @override
+  Future<void> removeTaskTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) async {}
 }
 
 final class _ReportRequest {

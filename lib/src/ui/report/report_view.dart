@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../domain/domain.dart';
 import '../layout_metrics.dart';
@@ -45,6 +48,10 @@ class _ReportViewState extends State<ReportView> {
     final report = _state.report;
     final selection = _state.selection;
     final dateRange = _state.dateRange;
+    final rowKeyPrefix = dateRange == null
+        ? 'report'
+        : '${dateRange.startLocalDateInclusive.toIso8601String()}-'
+              '${dateRange.endLocalDateExclusive.toIso8601String()}';
     final metrics = WydLayoutMetrics.of(context);
     final sectionGap = metrics.space(0.75);
 
@@ -105,9 +112,12 @@ class _ReportViewState extends State<ReportView> {
                           const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final row = report.rows[index];
-                        return ListTile(
-                          title: Text(row.taskText),
-                          trailing: Text(formatReportDuration(row.duration)),
+                        return _ReportRowTile(
+                          key: ValueKey(
+                            '$rowKeyPrefix-${row.taskTextNormalized}',
+                          ),
+                          row: row,
+                          controller: widget.controller,
                         );
                       },
                     ),
@@ -166,6 +176,284 @@ class _RangePresetSelector extends StatelessWidget {
             },
     );
   }
+}
+
+class _ReportRowTile extends StatefulWidget {
+  const _ReportRowTile({
+    required this.row,
+    required this.controller,
+    super.key,
+  });
+
+  final ReportRow row;
+  final ReportController controller;
+
+  @override
+  State<_ReportRowTile> createState() => _ReportRowTileState();
+}
+
+class _ReportRowTileState extends State<_ReportRowTile> {
+  final TextEditingController _tagController = TextEditingController();
+  final FocusNode _tagFocusNode = FocusNode();
+
+  bool _adding = false;
+  bool _submitting = false;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _tagFocusNode.addListener(_tagFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _tagFocusNode.removeListener(_tagFocusChanged);
+    _tagFocusNode.dispose();
+    _tagController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+    final textTheme = Theme.of(context).textTheme;
+    final chips = <Widget>[
+      for (final tag in widget.row.tags)
+        InputChip(
+          label: Text(tag.text),
+          onDeleted: _submitting ? null : () => unawaited(_removeTag(tag)),
+          deleteButtonTooltipMessage: 'Remove tag ${tag.text}',
+        ),
+      _adding ? _buildTagInput(context, metrics) : _buildAddChip(),
+    ];
+
+    return Padding(
+      padding: metrics.insetsAll(1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  widget.row.taskText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.titleMedium,
+                ),
+              ),
+              SizedBox(width: metrics.space(1)),
+              Text(
+                formatReportDuration(widget.row.duration),
+                style: textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          SizedBox(height: metrics.space(0.5)),
+          Wrap(
+            spacing: metrics.space(0.5),
+            runSpacing: metrics.space(0.25),
+            children: chips,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAddChip() {
+    return ActionChip(
+      avatar: const Icon(Icons.add),
+      label: const Text('Add tag'),
+      onPressed: _submitting ? null : _startAdding,
+    );
+  }
+
+  Widget _buildTagInput(BuildContext context, WydLayoutMetrics metrics) {
+    return SizedBox(
+      width: metrics.maxWidth(12, min: 160),
+      child: Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.escape): _CancelTagInputIntent(),
+        },
+        child: Actions(
+          actions: {
+            _CancelTagInputIntent: CallbackAction<_CancelTagInputIntent>(
+              onInvoke: (_) {
+                _cancelAdding();
+                return null;
+              },
+            ),
+          },
+          child: TextField(
+            controller: _tagController,
+            focusNode: _tagFocusNode,
+            autofocus: true,
+            enabled: !_submitting,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              isDense: true,
+              labelText: 'New tag',
+              errorText: _errorText,
+              suffixIcon: _submitting
+                  ? Padding(
+                      padding: metrics.insetsAll(0.75),
+                      child: const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : IconButton(
+                      tooltip: 'Add tag',
+                      onPressed: () => unawaited(_submitTag()),
+                      icon: const Icon(Icons.check),
+                    ),
+            ),
+            onChanged: (_) {
+              if (_errorText != null) {
+                setState(() => _errorText = null);
+              }
+            },
+            onSubmitted: (_) => unawaited(_submitTag()),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _startAdding() {
+    setState(() {
+      _adding = true;
+      _errorText = null;
+      _tagController.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _tagFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _cancelAdding() {
+    if (!_adding || _submitting) {
+      return;
+    }
+
+    setState(() {
+      _adding = false;
+      _errorText = null;
+      _tagController.clear();
+    });
+  }
+
+  Future<void> _submitTag() async {
+    if (_submitting) {
+      return;
+    }
+
+    late final TaskTag draft;
+    try {
+      draft = TaskTag.fromInput(_tagController.text);
+    } on TaskTagValidationException catch (error) {
+      setState(() => _errorText = error.message);
+      return;
+    }
+
+    final duplicate = widget.row.tags.any(
+      (tag) => tag.normalized == draft.normalized,
+    );
+    if (duplicate) {
+      setState(() => _errorText = 'Tag already exists.');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _errorText = null;
+    });
+
+    try {
+      await widget.controller.addTag(
+        taskTextNormalized: widget.row.taskTextNormalized,
+        tagText: draft.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _adding = false;
+        _submitting = false;
+        _tagController.clear();
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submitting = false;
+        _errorText = error.toString();
+      });
+    }
+  }
+
+  Future<void> _removeTag(TaskTag tag) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await widget.controller.removeTag(
+        taskTextNormalized: widget.row.taskTextNormalized,
+        tag: tag,
+      );
+      if (!mounted) {
+        return;
+      }
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text('Removed tag "${tag.text}".'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => unawaited(_restoreTag(tag)),
+          ),
+        ),
+      );
+    } catch (error) {
+      _showSnackBar('Unable to remove tag: $error');
+    }
+  }
+
+  Future<void> _restoreTag(TaskTag tag) async {
+    try {
+      await widget.controller.addTag(
+        taskTextNormalized: widget.row.taskTextNormalized,
+        tagText: tag.text,
+      );
+    } catch (error) {
+      _showSnackBar('Unable to restore tag: $error');
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _tagFocusChanged() {
+    if (!_tagFocusNode.hasFocus &&
+        _adding &&
+        !_submitting &&
+        _tagController.text.isEmpty) {
+      _cancelAdding();
+    }
+  }
+}
+
+final class _CancelTagInputIntent extends Intent {
+  const _CancelTagInputIntent();
 }
 
 class _DateHeader extends StatelessWidget {

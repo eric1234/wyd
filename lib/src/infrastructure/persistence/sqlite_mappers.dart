@@ -117,3 +117,23 @@ AppSettings settingsFromRow(Map<String, Object?> row) {
     startAtLogin: boolFromSqlite(row['start_at_login']),
   );
 }
+
+Map<String, Object?> taskTagToRow({
+  required String taskTextNormalized,
+  required TaskTag tag,
+  required DateTime createdAtUtc,
+}) {
+  return {
+    'task_text_normalized': taskTextNormalized,
+    'tag_text': tag.text,
+    'tag_text_normalized': tag.normalized,
+    'created_at_utc': serializeUtc(createdAtUtc),
+  };
+}
+
+TaskTag taskTagFromRow(Map<String, Object?> row) {
+  return TaskTag.hydrate(
+    text: row['tag_text'] as String,
+    normalized: row['tag_text_normalized'] as String,
+  );
+}

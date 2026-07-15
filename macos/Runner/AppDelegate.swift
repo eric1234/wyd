@@ -8,6 +8,7 @@ private let macOSPowerEventAcknowledgementTimeoutMilliseconds = 1800
 // Swift does not import the iokit_common_msg(...) C macros from IOMessage.h.
 private let macOSIOMessageCanSystemSleep: UInt32 = 0xe0000270
 private let macOSIOMessageSystemWillSleep: UInt32 = 0xe0000280
+private let macOSScreenIsLockedNotification = Notification.Name("com.apple.screenIsLocked")
 
 @main
 class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
@@ -29,6 +30,7 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   private var sleepPowerChangeTimeout: DispatchWorkItem?
   private var powerEventSink: FlutterEventSink?
   private var powerObservers: [NSObjectProtocol] = []
+  private var distributedPowerObservers: [NSObjectProtocol] = []
   private var powerEventSourcesConfigured = false
   private var systemPowerConnection: io_connect_t = IO_OBJECT_NULL
   private var systemPowerNotificationPort: IONotificationPortRef?
@@ -297,6 +299,15 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
         self?.sendBestEffortPowerEvent("lock")
       }
     )
+    distributedPowerObservers.append(
+      DistributedNotificationCenter.default().addObserver(
+        forName: macOSScreenIsLockedNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        self?.sendBestEffortPowerEvent("lock")
+      }
+    )
   }
 
   private func registerSystemPowerNotifications() -> Bool {
@@ -513,6 +524,10 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     let workspaceCenter = NSWorkspace.shared.notificationCenter
     for observer in powerObservers {
       workspaceCenter.removeObserver(observer)
+    }
+    let distributedCenter = DistributedNotificationCenter.default()
+    for observer in distributedPowerObservers {
+      distributedCenter.removeObserver(observer)
     }
   }
 }

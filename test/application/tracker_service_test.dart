@@ -562,7 +562,8 @@ final class _MemoryTransaction implements AppTransaction {
         failOnSave: failOnRuntimeSave,
       ),
       settings = _MemorySettingsRepository(store),
-      taskTags = _MemoryTaskTagRepository(store);
+      taskTags = _MemoryTaskTagRepository(store),
+      reportPreferences = const _MemoryReportPreferencesRepository();
 
   @override
   final ActivityLogRepository activityLog;
@@ -575,6 +576,9 @@ final class _MemoryTransaction implements AppTransaction {
 
   @override
   final TaskTagRepository taskTags;
+
+  @override
+  final ReportPreferencesRepository reportPreferences;
 }
 
 final class _MemoryActivityLogRepository implements ActivityLogRepository {
@@ -676,6 +680,17 @@ final class _MemoryTaskTagRepository implements TaskTagRepository {
   final _MemoryStore _store;
 
   @override
+  Future<List<TaskTag>> allTags() async {
+    final tags = <String, TaskTag>{};
+    for (final taskTags in _store.taskTags.values) {
+      for (final tag in taskTags) {
+        tags.putIfAbsent(tag.normalized, () => tag);
+      }
+    }
+    return tags.values.toList();
+  }
+
+  @override
   Future<Map<String, List<TaskTag>>> tagsForTasks(
     Iterable<String> taskTextNormalizedValues,
   ) async {
@@ -711,4 +726,16 @@ final class _MemoryTaskTagRepository implements TaskTagRepository {
       (tag) => tag.normalized == tagTextNormalized,
     );
   }
+}
+
+final class _MemoryReportPreferencesRepository
+    implements ReportPreferencesRepository {
+  const _MemoryReportPreferencesRepository();
+
+  @override
+  Future<ReportVisualizationPreferences> read() async =>
+      ReportVisualizationPreferences.defaults;
+
+  @override
+  Future<void> save(ReportVisualizationPreferences preferences) async {}
 }

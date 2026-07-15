@@ -44,8 +44,8 @@ void main() {
       );
 
       expect(find.text('Total: 1h 30m'), findsOneWidget);
-      expect(find.text('Write docs'), findsOneWidget);
-      expect(find.text('1h 30m'), findsOneWidget);
+      expect(find.text('Write docs'), findsNWidgets(2));
+      expect(find.text('1h 30m'), findsNWidgets(2));
     } finally {
       await _disposeWidgetHarness(tester, controller);
     }
@@ -418,6 +418,19 @@ final class _FakeReportLoader implements ActivityReportLoader {
   Object? error;
   final List<_AddTagCall> addCalls = [];
   final List<_RemoveTagCall> removeCalls = [];
+
+  @override
+  Future<ReportVisualizationData> loadVisualizationData() async {
+    return ReportVisualizationData(
+      availableTags: const [],
+      preferences: ReportVisualizationPreferences.defaults,
+    );
+  }
+
+  @override
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  ) async {}
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);

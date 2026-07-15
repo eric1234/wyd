@@ -198,6 +198,17 @@ final class SqliteTaskTagRepository implements TaskTagRepository {
   final DateTime Function()? _nowUtc;
 
   @override
+  Future<List<TaskTag>> allTags() async {
+    final rows = await _executor.rawQuery('''
+SELECT tag_text, tag_text_normalized
+FROM task_tags
+GROUP BY tag_text_normalized
+ORDER BY tag_text_normalized ASC
+''');
+    return rows.map(taskTagFromRow).toList();
+  }
+
+  @override
   Future<Map<String, List<TaskTag>>> tagsForTasks(
     Iterable<String> taskTextNormalizedValues,
   ) async {
@@ -287,12 +298,89 @@ final class SqliteTaskTagRepository implements TaskTagRepository {
   }
 }
 
+final class SqliteReportPreferencesRepository
+    implements ReportPreferencesRepository {
+  const SqliteReportPreferencesRepository(this._executor);
+
+  final DatabaseExecutor _executor;
+
+  @override
+  Future<ReportVisualizationPreferences> read() async {
+    final preferenceRows = await _executor.query(
+      'report_preferences',
+      where: 'id = ?',
+      whereArgs: [1],
+      limit: 1,
+    );
+    if (preferenceRows.isEmpty) {
+      return ReportVisualizationPreferences.defaults;
+    }
+
+    final mode = switch (preferenceRows.single['grouping_mode']) {
+      'task' => ReportGroupingMode.task,
+      'tags' => ReportGroupingMode.tags,
+      final value => throw StateError('Invalid report grouping mode: $value'),
+    };
+    final tagRows = await _executor.query(
+      'report_preference_tags',
+      orderBy: 'level_index ASC, position ASC',
+    );
+    final levels = <int, List<String>>{};
+    for (final row in tagRows) {
+      final level = row['level_index'] as int;
+      levels
+          .putIfAbsent(level, () => [])
+          .add(row['tag_text_normalized'] as String);
+    }
+    final highestLevel = levels.keys.fold(-1, (highest, value) {
+      return value > highest ? value : highest;
+    });
+    return ReportVisualizationPreferences(
+      mode: mode,
+      tagLevels: [
+        for (var index = 0; index <= highestLevel; index += 1)
+          ReportTagLevel(levels[index] ?? const []),
+      ],
+    );
+  }
+
+  @override
+  Future<void> save(ReportVisualizationPreferences preferences) async {
+    await _executor.insert('report_preferences', {
+      'id': 1,
+      'grouping_mode': preferences.mode == ReportGroupingMode.task
+          ? 'task'
+          : 'tags',
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _executor.delete('report_preference_tags');
+    for (
+      var levelIndex = 0;
+      levelIndex < preferences.tagLevels.length;
+      levelIndex += 1
+    ) {
+      final level = preferences.tagLevels[levelIndex];
+      for (
+        var position = 0;
+        position < level.tagTextNormalizedValues.length;
+        position += 1
+      ) {
+        await _executor.insert('report_preference_tags', {
+          'level_index': levelIndex,
+          'tag_text_normalized': level.tagTextNormalizedValues[position],
+          'position': position,
+        });
+      }
+    }
+  }
+}
+
 final class SqliteAppTransaction implements AppTransaction {
   SqliteAppTransaction(DatabaseExecutor executor)
     : activityLog = SqliteActivityLogRepository(executor),
       runtimeState = SqliteRuntimeStateRepository(executor),
       settings = SqliteSettingsRepository(executor),
-      taskTags = SqliteTaskTagRepository(executor);
+      taskTags = SqliteTaskTagRepository(executor),
+      reportPreferences = SqliteReportPreferencesRepository(executor);
 
   @override
   final ActivityLogRepository activityLog;
@@ -305,6 +393,9 @@ final class SqliteAppTransaction implements AppTransaction {
 
   @override
   final TaskTagRepository taskTags;
+
+  @override
+  final ReportPreferencesRepository reportPreferences;
 }
 
 final class SqliteTransactionRunner implements TransactionRunner {

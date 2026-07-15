@@ -413,6 +413,19 @@ final class _DelayedActivityReportLoader implements ActivityReportLoader {
   final List<_ReportRequest> requests = [];
 
   @override
+  Future<ReportVisualizationData> loadVisualizationData() async {
+    return ReportVisualizationData(
+      availableTags: const [],
+      preferences: ReportVisualizationPreferences.defaults,
+    );
+  }
+
+  @override
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  ) async {}
+
+  @override
   DateTime todayLocalDate() => today;
 
   @override
@@ -448,6 +461,19 @@ final class _StaticActivityReportLoader implements ActivityReportLoader {
 
   final ActivityReport report;
   final Object? addError;
+
+  @override
+  Future<ReportVisualizationData> loadVisualizationData() async {
+    return ReportVisualizationData(
+      availableTags: const [],
+      preferences: ReportVisualizationPreferences.defaults,
+    );
+  }
+
+  @override
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  ) async {}
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);

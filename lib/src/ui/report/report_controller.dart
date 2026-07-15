@@ -26,6 +26,10 @@ final class ReportState {
     this.loading = false,
     this.errorMessage,
     this.isOpen = false,
+    this.availableTags = const [],
+    this.visualizationPreferences,
+    this.breakdown,
+    this.preferenceErrorMessage,
   });
 
   final ReportSelection? selection;
@@ -34,6 +38,10 @@ final class ReportState {
   final bool loading;
   final String? errorMessage;
   final bool isOpen;
+  final List<TaskTag> availableTags;
+  final ReportVisualizationPreferences? visualizationPreferences;
+  final ReportBreakdown? breakdown;
+  final String? preferenceErrorMessage;
 
   ReportDateRange? get dateRange => selection?.dateRange;
 
@@ -57,6 +65,11 @@ final class ReportState {
     String? errorMessage,
     bool clearErrorMessage = false,
     bool? isOpen,
+    List<TaskTag>? availableTags,
+    ReportVisualizationPreferences? visualizationPreferences,
+    ReportBreakdown? breakdown,
+    String? preferenceErrorMessage,
+    bool clearPreferenceErrorMessage = false,
   }) {
     return ReportState(
       selection: selection ?? this.selection,
@@ -67,6 +80,13 @@ final class ReportState {
           ? null
           : errorMessage ?? this.errorMessage,
       isOpen: isOpen ?? this.isOpen,
+      availableTags: availableTags ?? this.availableTags,
+      visualizationPreferences:
+          visualizationPreferences ?? this.visualizationPreferences,
+      breakdown: breakdown ?? this.breakdown,
+      preferenceErrorMessage: clearPreferenceErrorMessage
+          ? null
+          : preferenceErrorMessage ?? this.preferenceErrorMessage,
     );
   }
 }
@@ -85,6 +105,7 @@ final class ReportController extends ChangeNotifier {
       return;
     }
 
+    await _loadVisualizationData();
     await loadSelection(
       ReportSelection(
         preset: ReportRangePreset.day,
@@ -98,7 +119,10 @@ final class ReportController extends ChangeNotifier {
     final selection = _state.isOpen
         ? _state.selection ?? _todaySelection()
         : _todaySelection();
-    unawaited(loadSelection(selection, isOpen: true, clearReport: true));
+    unawaited(() async {
+      await _loadVisualizationData();
+      await loadSelection(selection, isOpen: true, clearReport: true);
+    }());
   }
 
   void close() {
@@ -156,6 +180,11 @@ final class ReportController extends ChangeNotifier {
           selection: selection,
           today: today,
           report: report,
+          breakdown: buildReportBreakdown(
+            report,
+            _state.visualizationPreferences ??
+                ReportVisualizationPreferences.defaults,
+          ),
           loading: false,
           clearErrorMessage: true,
           isOpen: isOpen,
@@ -192,6 +221,7 @@ final class ReportController extends ChangeNotifier {
         tag,
       ]);
     });
+    await _loadVisualizationData();
     return tag;
   }
 
@@ -209,6 +239,60 @@ final class ReportController extends ChangeNotifier {
           if (existing.normalized != tag.normalized) existing,
       ];
     });
+    await _loadVisualizationData();
+  }
+
+  Future<void> setGroupingMode(ReportGroupingMode mode) async {
+    final current =
+        _state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    final levels = mode == ReportGroupingMode.tags && current.tagLevels.isEmpty
+        ? [ReportTagLevel(const [])]
+        : current.tagLevels;
+    await _savePreferences(current.copyWith(mode: mode, tagLevels: levels));
+  }
+
+  Future<void> setTagLevel(int index, Iterable<String> tags) async {
+    final current =
+        _state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    final levels = current.tagLevels.toList();
+    while (levels.length <= index) {
+      levels.add(ReportTagLevel(const []));
+    }
+    levels[index] = ReportTagLevel(tags);
+    await _savePreferences(current.copyWith(tagLevels: levels));
+  }
+
+  Future<void> addTagLevel() async {
+    final current =
+        _state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    if (current.tagLevels.length >=
+        ReportVisualizationPreferences.maxTagLevels) {
+      return;
+    }
+    await _savePreferences(
+      current.copyWith(
+        tagLevels: [...current.tagLevels, ReportTagLevel(const [])],
+      ),
+    );
+  }
+
+  Future<void> removeTagLevel(int index) async {
+    final current =
+        _state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    final levels = current.tagLevels.toList();
+    if (index < 0 || index >= levels.length) {
+      return;
+    }
+    levels.removeAt(index);
+    await _savePreferences(current.copyWith(tagLevels: levels));
+  }
+
+  void clearPreferenceError() {
+    _setState(_state.copyWith(clearPreferenceErrorMessage: true));
   }
 
   ReportSelection _todaySelection() => ReportSelection(
@@ -229,26 +313,77 @@ final class ReportController extends ChangeNotifier {
     if (report == null) {
       return;
     }
+    final updatedReport = ActivityReport(
+      totalDuration: report.totalDuration,
+      rows: [
+        for (final row in report.rows)
+          if (row.taskTextNormalized == taskTextNormalized)
+            ReportRow(
+              taskText: row.taskText,
+              taskTextNormalized: row.taskTextNormalized,
+              duration: row.duration,
+              tags: update(row.tags),
+            )
+          else
+            row,
+      ],
+    );
 
     _setState(
       _state.copyWith(
-        report: ActivityReport(
-          totalDuration: report.totalDuration,
-          rows: [
-            for (final row in report.rows)
-              if (row.taskTextNormalized == taskTextNormalized)
-                ReportRow(
-                  taskText: row.taskText,
-                  taskTextNormalized: row.taskTextNormalized,
-                  duration: row.duration,
-                  tags: update(row.tags),
-                )
-              else
-                row,
-          ],
+        report: updatedReport,
+        breakdown: buildReportBreakdown(
+          updatedReport,
+          _state.visualizationPreferences ??
+              ReportVisualizationPreferences.defaults,
         ),
       ),
     );
+  }
+
+  Future<void> _loadVisualizationData() async {
+    final data = await _service.loadVisualizationData();
+    final report = _state.report;
+    _setState(
+      _state.copyWith(
+        availableTags: data.availableTags,
+        visualizationPreferences: data.preferences,
+        breakdown: report == null
+            ? _state.breakdown
+            : buildReportBreakdown(report, data.preferences),
+      ),
+    );
+  }
+
+  Future<void> _savePreferences(
+    ReportVisualizationPreferences preferences,
+  ) async {
+    final previous =
+        _state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    final report = _state.report;
+    _setState(
+      _state.copyWith(
+        visualizationPreferences: preferences,
+        breakdown: report == null
+            ? _state.breakdown
+            : buildReportBreakdown(report, preferences),
+        clearPreferenceErrorMessage: true,
+      ),
+    );
+    try {
+      await _service.saveVisualizationPreferences(preferences);
+    } catch (error) {
+      _setState(
+        _state.copyWith(
+          visualizationPreferences: previous,
+          breakdown: report == null
+              ? _state.breakdown
+              : buildReportBreakdown(report, previous),
+          preferenceErrorMessage: 'Unable to save report grouping: $error',
+        ),
+      );
+    }
   }
 
   List<TaskTag> _sortTags(List<TaskTag> tags) {

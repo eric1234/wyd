@@ -25,6 +25,11 @@ void main() {
       expect(tables.map((row) => row['name']), contains('app_state'));
       expect(tables.map((row) => row['name']), contains('settings'));
       expect(tables.map((row) => row['name']), contains('task_tags'));
+      expect(tables.map((row) => row['name']), contains('report_preferences'));
+      expect(
+        tables.map((row) => row['name']),
+        contains('report_preference_tags'),
+      );
       expect(
         indexes.map((row) => row['name']),
         contains('idx_activity_log_occurred_id'),
@@ -379,6 +384,53 @@ void main() {
           await tempDirectory.delete(recursive: true);
         }
       }
+    });
+  });
+
+  group('SqliteReportPreferencesRepository', () {
+    test('returns defaults and round trips ordered levels', () async {
+      final database = await AppDatabase.openInMemory(
+        databaseFactory: databaseFactoryFfi,
+      );
+      addTearDown(database.close);
+      final repository = SqliteReportPreferencesRepository(database.database);
+
+      expect(await repository.read(), ReportVisualizationPreferences.defaults);
+
+      final preferences = ReportVisualizationPreferences(
+        mode: ReportGroupingMode.tags,
+        tagLevels: [
+          ReportTagLevel(['client-a', 'client-b']),
+          ReportTagLevel(['build', 'review']),
+        ],
+      );
+      await repository.save(preferences);
+
+      expect(await repository.read(), preferences);
+    });
+
+    test('replacement removes old selected tags', () async {
+      final database = await AppDatabase.openInMemory(
+        databaseFactory: databaseFactoryFfi,
+      );
+      addTearDown(database.close);
+      final repository = SqliteReportPreferencesRepository(database.database);
+      await repository.save(
+        ReportVisualizationPreferences(
+          mode: ReportGroupingMode.tags,
+          tagLevels: [
+            ReportTagLevel(['old']),
+          ],
+        ),
+      );
+
+      final replacement = ReportVisualizationPreferences(
+        mode: ReportGroupingMode.task,
+      );
+      await repository.save(replacement);
+
+      expect(await repository.read(), replacement);
+      expect(await database.database.query('report_preference_tags'), isEmpty);
     });
   });
 

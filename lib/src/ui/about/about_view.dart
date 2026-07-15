@@ -7,6 +7,8 @@ import '../layout_metrics.dart';
 typedef AboutAppInfoLoader = Future<AboutAppInfo> Function();
 typedef AboutLinkLauncher = Future<bool> Function(Uri url);
 
+const _snapshotCommit = String.fromEnvironment('WYD_SNAPSHOT_COMMIT');
+
 final class WydAboutMetadata {
   const WydAboutMetadata._();
 
@@ -19,23 +21,36 @@ final class WydAboutMetadata {
 }
 
 final class AboutAppInfo {
-  const AboutAppInfo({required this.version, required this.buildNumber});
+  const AboutAppInfo({
+    required this.version,
+    required this.buildNumber,
+    this.snapshotCommit = '',
+  });
 
   factory AboutAppInfo.fromPackageInfo(PackageInfo packageInfo) {
     return AboutAppInfo(
       version: packageInfo.version,
       buildNumber: packageInfo.buildNumber,
+      snapshotCommit: _snapshotCommit,
     );
   }
 
   final String version;
   final String buildNumber;
+  final String snapshotCommit;
 
   String get versionLabel =>
       version.isEmpty ? 'Version unknown' : 'Version $version';
 
   String get buildLabel =>
       buildNumber.isEmpty ? 'Build unknown' : 'Build $buildNumber';
+
+  String get snapshotLabel {
+    final commit = snapshotCommit.length > 7
+        ? snapshotCommit.substring(0, 7)
+        : snapshotCommit;
+    return 'Snapshot $commit';
+  }
 }
 
 Future<AboutAppInfo> loadWydAboutAppInfo() async {
@@ -179,6 +194,10 @@ class _AboutContent extends StatelessWidget {
                 Text(version),
                 SizedBox(height: metrics.space(0.5)),
                 Text(build),
+                if (snapshot.data?.snapshotCommit.isNotEmpty ?? false) ...[
+                  SizedBox(height: metrics.space(0.5)),
+                  Text(snapshot.data!.snapshotLabel),
+                ],
               ],
             );
           },

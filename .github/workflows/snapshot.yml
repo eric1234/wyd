@@ -1,0 +1,284 @@
+name: Snapshot
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshot-release
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.41.7
+
+jobs:
+  discover:
+    name: Check for changes
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.changes.outputs.commit }}
+      should-build: ${{ steps.changes.outputs.should-build }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Compare with published snapshot
+        id: changes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit="$(git rev-parse HEAD)"
+          published="$(git ls-remote --refs origin refs/tags/snapshot | cut -f1)"
+          release_commit="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq '.body | capture("<!-- snapshot-commit: (?<sha>[0-9a-f]{40}) -->").sha' \
+            2>/dev/null || true)"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if [[ "$commit" == "$published" && "$commit" == "$release_commit" ]]; then
+            echo "should-build=false" >> "$GITHUB_OUTPUT"
+            echo "Snapshot already represents $commit."
+          else
+            echo "should-build=true" >> "$GITHUB_OUTPUT"
+            echo "Building $commit (published: ${published:-none})."
+          fi
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: discover
+    if: needs.discover.outputs.should-build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-24.04
+            desktop: linux
+            asset: wyd-snapshot-linux-x64.zip
+          - platform: macos
+            os: macos-15
+            desktop: macos
+            asset: wyd-snapshot-macos-arm64.zip
+          - platform: windows
+            os: windows-2025
+            desktop: windows
+            asset: wyd-snapshot-windows-x64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out snapshot commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover.outputs.commit }}
+
+      - name: Refresh Linux package indexes
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update
+
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'linux'
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        with:
+          packages: clang cmake libayatana-appindicator3-dev libxcb-screensaver0-dev lld-18 llvm-18 ninja-build
+          version: wyd-snapshot-linux-deps-v1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Enable desktop support
+        run: flutter config --enable-${{ matrix.desktop }}-desktop
+
+      - name: Install Dart and Flutter dependencies
+        run: flutter pub get
+
+      - name: Build release bundle
+        run: >-
+          flutter build ${{ matrix.desktop }} --release
+          --build-name=0.0.0
+          --build-number=${{ github.run_number }}
+          --dart-define=WYD_SNAPSHOT_COMMIT=${{ needs.discover.outputs.commit }}
+
+      - name: Archive Linux bundle
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          test -x build/linux/x64/release/bundle/wyd
+          test -d build/linux/x64/release/bundle/data
+          test -d build/linux/x64/release/bundle/lib
+          mkdir -p dist/wyd
+          cp -a build/linux/x64/release/bundle/. dist/wyd/
+          (cd dist && zip -qr "${{ matrix.asset }}" wyd)
+          rm -rf dist/wyd
+
+      - name: Archive macOS bundle
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          test -x build/macos/Build/Products/Release/wyd.app/Contents/MacOS/wyd
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/macos/Build/Products/Release/wyd.app \
+            "dist/${{ matrix.asset }}"
+
+      - name: Archive Windows bundle
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $bundle = 'build/windows/x64/runner/Release'
+          if (-not (Test-Path "$bundle/wyd.exe" -PathType Leaf)) { throw 'Missing wyd.exe' }
+          if (-not (Test-Path "$bundle/data" -PathType Container)) { throw 'Missing data directory' }
+          New-Item -ItemType Directory -Force dist/wyd | Out-Null
+          Copy-Item "$bundle/*" dist/wyd -Recurse
+          Compress-Archive -Path dist/wyd -DestinationPath "dist/${{ matrix.asset }}"
+          Remove-Item dist/wyd -Recurse -Force
+
+      - name: Generate checksum
+        shell: bash
+        run: |
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          fi
+
+      - name: Upload snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-${{ matrix.platform }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    name: Publish snapshot
+    needs: [discover, build]
+    if: needs.discover.outputs.should-build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SNAPSHOT_COMMIT: ${{ needs.discover.outputs.commit }}
+    steps:
+      - name: Download snapshot artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: snapshot-*
+          path: dist
+          merge-multiple: true
+
+      - name: Validate snapshot assets
+        shell: bash
+        run: |
+          assets=(
+            wyd-snapshot-linux-x64.zip
+            wyd-snapshot-linux-x64.zip.sha256
+            wyd-snapshot-macos-arm64.zip
+            wyd-snapshot-macos-arm64.zip.sha256
+            wyd-snapshot-windows-x64.zip
+            wyd-snapshot-windows-x64.zip.sha256
+          )
+          for asset in "${assets[@]}"; do
+            test -s "dist/$asset"
+          done
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 6
+
+      - name: Create or update snapshot prerelease
+        shell: bash
+        run: |
+          short_commit="${SNAPSHOT_COMMIT:0:7}"
+          built_at="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          notes="$(mktemp)"
+          cat > "$notes" <<EOF
+          Automated, unsigned development snapshot of [\`$short_commit\`](https://github.com/${GITHUB_REPOSITORY}/commit/${SNAPSHOT_COMMIT}).
+
+          - Built: $built_at
+          - Flutter: $FLUTTER_VERSION
+          - Platforms: Linux x64, macOS arm64, Windows x64
+
+          These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
+          EOF
+
+          if gh release view snapshot --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Latest snapshot" \
+              --notes-file "$notes" \
+              --draft \
+              --prerelease \
+              --latest=false
+          else
+            gh release create snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SNAPSHOT_COMMIT" \
+              --title "Latest snapshot" \
+              --notes-file "$notes" \
+              --prerelease \
+              --draft \
+              --latest=false
+          fi
+
+          while IFS= read -r asset; do
+            gh release delete-asset snapshot "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --yes
+          done < <(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name')
+
+          gh release upload snapshot dist/* --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify release and record published commit
+        shell: bash
+        run: |
+          expected="$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)"
+          actual="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name' | sort)"
+          test "$actual" = "$expected"
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" >/dev/null 2>&1; then
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/snapshot" \
+              -f sha="$SNAPSHOT_COMMIT" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref='refs/tags/snapshot' \
+              -f sha="$SNAPSHOT_COMMIT" >/dev/null
+          fi
+
+          gh release edit snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease \
+            --latest=false
+
+          notes="$(mktemp)"
+          gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq '.body' > "$notes"
+          printf '\n<!-- snapshot-commit: %s -->\n' "$SNAPSHOT_COMMIT" >> "$notes"
+          gh release edit snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-file "$notes" \
+            --prerelease \
+            --latest=false

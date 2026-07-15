@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 
 import '../application/application.dart';
+import 'about/about.dart';
 import 'layout_metrics.dart';
 import 'quick_entry/quick_entry.dart';
 import 'report/report.dart';
@@ -37,11 +38,15 @@ class WydChildWindowApp extends StatelessWidget {
     required this.role,
     this.reportController,
     this.settingsController,
+    this.aboutInfoLoader = loadWydAboutAppInfo,
+    this.aboutLinkLauncher = launchWydAboutLink,
   });
 
   final WindowRole role;
   final ReportController? reportController;
   final SettingsController? settingsController;
+  final AboutAppInfoLoader aboutInfoLoader;
+  final AboutLinkLauncher aboutLinkLauncher;
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +69,10 @@ class WydChildWindowApp extends StatelessWidget {
                   message: 'Settings window is unavailable.',
                 )
               : SettingsView(controller: settingsController!),
+        WindowRole.about => AboutView(
+          infoLoader: aboutInfoLoader,
+          linkLauncher: aboutLinkLauncher,
+        ),
         WindowRole.quickEntry => const _PlaceholderRolePage(
           title: 'Update Task',
           message: 'Quick entry is managed by the tray process.',
@@ -244,6 +253,7 @@ class WydRolePage extends StatelessWidget {
                 message: 'Settings window is unavailable.',
               )
             : SettingsView(controller: controller.settingsController!),
+      WindowRole.about => const AboutView(),
       null => const _TrayResidentPage(),
     };
 

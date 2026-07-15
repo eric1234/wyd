@@ -1,3 +1,5 @@
+import 'task_tag.dart';
+
 final class ReportSegment {
   ReportSegment({
     required this.taskText,
@@ -23,21 +25,45 @@ final class ReportRow {
     required this.taskText,
     required this.taskTextNormalized,
     required this.duration,
+    this.tags = const [],
   });
 
   final String taskText;
   final String taskTextNormalized;
   final Duration duration;
+  final List<TaskTag> tags;
 }
 
-final class DailyReport {
-  const DailyReport({
-    required this.localDate,
-    required this.totalDuration,
-    required this.rows,
-  });
+final class ReportDateRange {
+  ReportDateRange({
+    required DateTime startLocalDateInclusive,
+    required DateTime endLocalDateExclusive,
+  }) : startLocalDateInclusive = DateTime(
+         startLocalDateInclusive.year,
+         startLocalDateInclusive.month,
+         startLocalDateInclusive.day,
+       ),
+       endLocalDateExclusive = DateTime(
+         endLocalDateExclusive.year,
+         endLocalDateExclusive.month,
+         endLocalDateExclusive.day,
+       ) {
+    if (!this.endLocalDateExclusive.isAfter(this.startLocalDateInclusive)) {
+      throw ArgumentError.value(
+        endLocalDateExclusive,
+        'endLocalDateExclusive',
+        'must be after startLocalDateInclusive',
+      );
+    }
+  }
 
-  final DateTime localDate;
+  final DateTime startLocalDateInclusive;
+  final DateTime endLocalDateExclusive;
+}
+
+final class ActivityReport {
+  const ActivityReport({required this.totalDuration, required this.rows});
+
   final Duration totalDuration;
   final List<ReportRow> rows;
 }

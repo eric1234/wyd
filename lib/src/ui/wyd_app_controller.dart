@@ -181,6 +181,10 @@ final class WydAppController extends ChangeNotifier {
     await _windowCoordinator.openOrFocus(WindowRole.settings);
   }
 
+  Future<void> openAbout() async {
+    await _windowCoordinator.openOrFocus(WindowRole.about);
+  }
+
   Future<void> stopTask() async {
     await _stopTaskAndOpenPrompt(ActivitySource.manualStop);
   }
@@ -272,6 +276,10 @@ final class WydAppController extends ChangeNotifier {
       case WindowRole.settings:
         await settingsController?.close();
         if (_activeRole == WindowRole.settings) {
+          _activeRole = null;
+        }
+      case WindowRole.about:
+        if (_activeRole == WindowRole.about) {
           _activeRole = null;
         }
     }
@@ -414,6 +422,8 @@ final class WydAppController extends ChangeNotifier {
             await openReport();
           case TrayMenuAction.settings:
             await openSettings();
+          case TrayMenuAction.about:
+            await openAbout();
           case TrayMenuAction.exit:
             await exitRequested();
         }

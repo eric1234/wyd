@@ -1,4 +1,4 @@
-enum TrayMenuAction { updateTask, stopTask, report, settings, exit }
+enum TrayMenuAction { updateTask, stopTask, report, settings, about, exit }
 
 enum TrayIconStatus { tracking, idle }
 
@@ -34,7 +34,7 @@ abstract interface class TrayAdapter {
   Future<void> dispose();
 }
 
-enum WindowRole { quickEntry, report, settings }
+enum WindowRole { quickEntry, report, settings, about }
 
 final class WindowRoleConfiguration {
   const WindowRoleConfiguration({
@@ -96,6 +96,13 @@ final class WindowRoleConfiguration {
         title: 'Settings',
         width: 520,
         height: 460,
+      ),
+      WindowRole.about => const WindowRoleConfiguration(
+        role: WindowRole.about,
+        title: 'About wyd',
+        width: 380,
+        height: 340,
+        resizable: false,
       ),
     };
   }

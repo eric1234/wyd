@@ -1,4 +1,5 @@
 import Cocoa
+import Darwin
 import FlutterMacOS
 import IOKit.pwr_mgt
 import ServiceManagement
@@ -12,6 +13,9 @@ private let macOSScreenIsLockedNotification = Notification.Name("com.apple.scree
 
 @main
 class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
+  private let clearDataFlag = "--clear-data"
+  private let runningInstanceMessage = "wyd is currently running. Quit wyd before clearing data."
+  private var instanceLockFileDescriptor: Int32 = -1
   private var singleInstanceChannel: FlutterMethodChannel?
   private var lifecycleChannel: FlutterMethodChannel?
   private var powerEventChannel: FlutterEventChannel?
@@ -89,6 +93,11 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     launchAtStartupChannels.append(channel)
   }
 
+  override func applicationWillFinishLaunching(_ notification: Notification) {
+    acquireInstanceLockOrExit()
+    super.applicationWillFinishLaunching(notification)
+  }
+
   private func isLaunchAtStartupEnabled() -> Bool {
     guard #available(macOS 13.0, *) else {
       return false
@@ -130,6 +139,11 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     }
   }
 
+  override func applicationWillTerminate(_ notification: Notification) {
+    releaseInstanceLock()
+    super.applicationWillTerminate(notification)
+  }
+
   override func applicationDidFinishLaunching(_ notification: Notification) {
     super.applicationDidFinishLaunching(notification)
     hideMainFlutterWindow()
@@ -152,6 +166,63 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
 
     notifyExistingInstanceActivated()
     return false
+  }
+
+  private func acquireInstanceLockOrExit() {
+    let lockURL = instanceLockURL()
+    do {
+      try FileManager.default.createDirectory(
+        at: lockURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+      )
+    } catch {
+      exitWithError("Failed to create wyd lock directory: \(error.localizedDescription)")
+    }
+
+    let fileDescriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    guard fileDescriptor >= 0 else {
+      exitWithError("Failed to open wyd lock file: \(currentErrnoMessage())")
+    }
+
+    if flock(fileDescriptor, LOCK_EX | LOCK_NB) != 0 {
+      close(fileDescriptor)
+      if CommandLine.arguments.contains(clearDataFlag) {
+        exitWithError(runningInstanceMessage)
+      }
+      exit(EXIT_FAILURE)
+    }
+
+    instanceLockFileDescriptor = fileDescriptor
+  }
+
+  private func releaseInstanceLock() {
+    guard instanceLockFileDescriptor >= 0 else {
+      return
+    }
+
+    flock(instanceLockFileDescriptor, LOCK_UN)
+    close(instanceLockFileDescriptor)
+    instanceLockFileDescriptor = -1
+  }
+
+  private func instanceLockURL() -> URL {
+    let applicationSupportURL = FileManager.default.urls(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask
+    ).first ?? FileManager.default.homeDirectoryForCurrentUser
+
+    return applicationSupportURL
+      .appendingPathComponent("wyd", isDirectory: true)
+      .appendingPathComponent("wyd.lock", isDirectory: false)
+  }
+
+  private func currentErrnoMessage() -> String {
+    return String(cString: strerror(errno))
+  }
+
+  private func exitWithError(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("\(message)\n".utf8))
+    exit(EXIT_FAILURE)
   }
 
   override func applicationShouldTerminate(

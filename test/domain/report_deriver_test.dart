@@ -19,12 +19,12 @@ void main() {
         ),
       ];
 
-      final firstDay = ActivityTimeline(events).buildDailyReport(
-        localDate: DateTime(2026, 1, 1),
+      final firstDay = ActivityTimeline(events).buildReport(
+        dateRange: _dayRange(DateTime(2026, 1, 1)),
         nowUtc: stopLocal.toUtc(),
       );
-      final secondDay = ActivityTimeline(events).buildDailyReport(
-        localDate: DateTime(2026, 1, 2),
+      final secondDay = ActivityTimeline(events).buildReport(
+        dateRange: _dayRange(DateTime(2026, 1, 2)),
         nowUtc: stopLocal.toUtc(),
       );
 
@@ -42,8 +42,8 @@ void main() {
               occurredAtUtc: startLocal.toUtc(),
               taskText: 'Write docs',
             ),
-          ]).buildDailyReport(
-            localDate: DateTime(2026, 1, 2),
+          ]).buildReport(
+            dateRange: _dayRange(DateTime(2026, 1, 2)),
             nowUtc: nowLocal.toUtc(),
           );
 
@@ -76,8 +76,8 @@ void main() {
         ),
       ];
 
-      final report = ActivityTimeline(events).buildDailyReport(
-        localDate: day,
+      final report = ActivityTimeline(events).buildReport(
+        dateRange: _dayRange(day),
         nowUtc: DateTime(2026, 1, 2, 12).toUtc(),
       );
 
@@ -106,8 +106,8 @@ void main() {
               occurredAtUtc: DateTime(2026, 1, 2, 11).toUtc(),
               source: ActivitySource.manualStop,
             ),
-          ]).buildDailyReport(
-            localDate: DateTime(2026, 1, 2),
+          ]).buildReport(
+            dateRange: _dayRange(DateTime(2026, 1, 2)),
             nowUtc: DateTime(2026, 1, 2, 11).toUtc(),
           );
 
@@ -133,8 +133,8 @@ void main() {
               occurredAtUtc: switchTime,
               source: ActivitySource.manualStop,
             ),
-          ]).buildDailyReport(
-            localDate: DateTime(2026, 1, 2),
+          ]).buildReport(
+            dateRange: _dayRange(DateTime(2026, 1, 2)),
             nowUtc: DateTime.utc(2026, 1, 2, 11),
           );
 
@@ -168,13 +168,53 @@ void main() {
               occurredAtUtc: DateTime(2026, 1, 2, 11).toUtc(),
               source: ActivitySource.manualStop,
             ),
-          ]).buildDailyReport(
-            localDate: DateTime(2026, 1, 2),
+          ]).buildReport(
+            dateRange: _dayRange(DateTime(2026, 1, 2)),
             nowUtc: DateTime(2026, 1, 2, 11).toUtc(),
           );
 
       expect(report.totalDuration, const Duration(hours: 2));
       expect(report.rows, hasLength(2));
     });
+
+    test('clips segments to a multi-day report range', () {
+      final report =
+          ActivityTimeline([
+            ActivityLogEvent.startTask(
+              id: 1,
+              occurredAtUtc: DateTime(2026, 1, 1, 12).toUtc(),
+              taskText: 'Long task',
+            ),
+            ActivityLogEvent.stopTask(
+              id: 2,
+              occurredAtUtc: DateTime(2026, 1, 5, 12).toUtc(),
+              source: ActivitySource.manualStop,
+            ),
+          ]).buildReport(
+            dateRange: ReportDateRange(
+              startLocalDateInclusive: DateTime(2026, 1, 2),
+              endLocalDateExclusive: DateTime(2026, 1, 5),
+            ),
+            nowUtc: DateTime(2026, 1, 5, 12).toUtc(),
+          );
+
+      expect(report.totalDuration, const Duration(days: 3));
+      expect(report.rows.single.taskText, 'Long task');
+    });
+
+    test('normalizes report date range inputs to local dates', () {
+      final range = ReportDateRange(
+        startLocalDateInclusive: DateTime(2026, 1, 2, 13, 30),
+        endLocalDateExclusive: DateTime(2026, 1, 4, 8),
+      );
+
+      expect(range.startLocalDateInclusive, DateTime(2026, 1, 2));
+      expect(range.endLocalDateExclusive, DateTime(2026, 1, 4));
+    });
   });
 }
+
+ReportDateRange _dayRange(DateTime date) => ReportDateRange(
+  startLocalDateInclusive: date,
+  endLocalDateExclusive: DateTime(date.year, date.month, date.day + 1),
+);

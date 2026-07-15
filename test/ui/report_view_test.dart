@@ -24,8 +24,7 @@ void main() {
 
   testWidgets('shows daily total and rows', (tester) async {
     final loader = _FakeReportLoader(
-      report: DailyReport(
-        localDate: DateTime(2026, 1, 2),
+      report: ActivityReport(
         totalDuration: const Duration(minutes: 90),
         rows: const [
           ReportRow(
@@ -52,6 +51,159 @@ void main() {
     }
   });
 
+  testWidgets('shows task tags and add tag action', (tester) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: const Duration(minutes: 90),
+            tags: [TaskTag.fromInput('Docs')],
+          ),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      expect(find.text('Docs'), findsOneWidget);
+      expect(find.text('Add tag'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('adds a tag from inline input', (tester) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'Bug');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(loader.addCalls.single.taskTextNormalized, 'write docs');
+      expect(loader.addCalls.single.tagText, 'Bug');
+      expect(find.text('Bug'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('shows inline error for duplicate tag input', (tester) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: const Duration(minutes: 90),
+            tags: [TaskTag.fromInput('Bug')],
+          ),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), ' bug ');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(find.text('Tag already exists.'), findsOneWidget);
+      expect(loader.addCalls, isEmpty);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('removes a tag with undo snackbar', (tester) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: const Duration(minutes: 90),
+            tags: [TaskTag.fromInput('Bug')],
+          ),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('Remove tag Bug'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(loader.removeCalls.single.taskTextNormalized, 'write docs');
+      expect(loader.removeCalls.single.tagTextNormalized, 'bug');
+      expect(find.text('Removed tag "Bug".'), findsOneWidget);
+      expect(find.text('Bug'), findsNothing);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pump();
+
+      expect(loader.addCalls.single.tagText, 'Bug');
+      expect(find.text('Bug'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
   testWidgets('does not overflow with high text scaling', (tester) async {
     addTearDown(() async {
       await tester.binding.setSurfaceSize(null);
@@ -61,8 +213,7 @@ void main() {
       Size(configuration.width, configuration.height),
     );
     final loader = _FakeReportLoader(
-      report: DailyReport(
-        localDate: DateTime(2026, 1, 2),
+      report: ActivityReport(
         totalDuration: const Duration(minutes: 90),
         rows: const [
           ReportRow(
@@ -107,7 +258,57 @@ void main() {
     }
   });
 
-  testWidgets('previous and next buttons navigate dates', (tester) async {
+  testWidgets('selects a Monday-start weekly report range', (tester) async {
+    final loader = _FakeReportLoader();
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: ReportView(controller: controller)),
+      );
+
+      await tester.tap(find.byType(DropdownButtonFormField<ReportRangePreset>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Week').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('2025-12-29 - 2026-01-02'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('resets the range dropdown after closing and reopening', (
+    tester,
+  ) async {
+    final loader = _FakeReportLoader();
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: ReportView(controller: controller)),
+      );
+
+      await tester.tap(find.byType(DropdownButtonFormField<ReportRangePreset>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Week').last);
+      await tester.pumpAndSettle();
+      expect(_selectedRange(tester), ReportRangePreset.week);
+
+      controller.close();
+      controller.refreshForShow();
+      await tester.pumpAndSettle();
+
+      expect(_selectedRange(tester), ReportRangePreset.day);
+      expect(find.text('2026-01-02'), findsOneWidget);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('previous and next buttons navigate date ranges', (tester) async {
     final loader = _FakeReportLoader();
     final controller = ReportController(loader);
     await controller.open();
@@ -148,8 +349,7 @@ void main() {
 
   test('refreshForShow reloads a fresh report snapshot', () async {
     final loader = _FakeReportLoader(
-      report: DailyReport(
-        localDate: DateTime(2026, 1, 2),
+      report: ActivityReport(
         totalDuration: const Duration(minutes: 30),
         rows: const [
           ReportRow(
@@ -162,8 +362,7 @@ void main() {
     );
     final controller = ReportController(loader);
     await controller.open();
-    loader.report = DailyReport(
-      localDate: DateTime(2026, 1, 2),
+    loader.report = ActivityReport(
       totalDuration: const Duration(minutes: 45),
       rows: const [
         ReportRow(
@@ -204,26 +403,63 @@ Widget _scaledMaterialApp({required Widget home}) {
   );
 }
 
-final class _FakeReportLoader implements DailyReportLoader {
+ReportRangePreset? _selectedRange(WidgetTester tester) {
+  return tester
+      .widget<DropdownButtonFormField<ReportRangePreset>>(
+        find.byType(DropdownButtonFormField<ReportRangePreset>),
+      )
+      .initialValue;
+}
+
+final class _FakeReportLoader implements ActivityReportLoader {
   _FakeReportLoader({this.report, this.error});
 
-  DailyReport? report;
+  ActivityReport? report;
   Object? error;
+  final List<_AddTagCall> addCalls = [];
+  final List<_RemoveTagCall> removeCalls = [];
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);
 
   @override
-  Future<DailyReport> loadDailyReport(DateTime localDate) async {
+  Future<ActivityReport> loadReport(ReportDateRange dateRange) async {
     final error = this.error;
     if (error != null) {
       throw error;
     }
     return report ??
-        DailyReport(
-          localDate: localDate,
-          totalDuration: Duration.zero,
-          rows: const [],
-        );
+        ActivityReport(totalDuration: Duration.zero, rows: const []);
   }
+
+  @override
+  Future<TaskTag> addTaskTag({
+    required String taskTextNormalized,
+    required String tagText,
+  }) async {
+    addCalls.add(_AddTagCall(taskTextNormalized, tagText));
+    return TaskTag.fromInput(tagText);
+  }
+
+  @override
+  Future<void> removeTaskTag({
+    required String taskTextNormalized,
+    required String tagTextNormalized,
+  }) async {
+    removeCalls.add(_RemoveTagCall(taskTextNormalized, tagTextNormalized));
+  }
+}
+
+final class _AddTagCall {
+  const _AddTagCall(this.taskTextNormalized, this.tagText);
+
+  final String taskTextNormalized;
+  final String tagText;
+}
+
+final class _RemoveTagCall {
+  const _RemoveTagCall(this.taskTextNormalized, this.tagTextNormalized);
+
+  final String taskTextNormalized;
+  final String tagTextNormalized;
 }

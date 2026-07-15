@@ -2,6 +2,11 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <iostream>
+#include <string>
+#include <vector>
+
 #include "flutter_window.h"
 #include "utils.h"
 
@@ -28,10 +33,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   const UINT second_instance_message =
       ::RegisterWindowMessage(kSecondInstanceMessageName);
+  std::vector<std::string> command_line_arguments =
+      GetCommandLineArguments();
+  const bool clear_data_requested =
+      std::find(command_line_arguments.begin(), command_line_arguments.end(),
+                "--clear-data") != command_line_arguments.end();
   HANDLE single_instance_mutex =
       ::CreateMutex(nullptr, TRUE, kSingleInstanceMutexName);
   if (single_instance_mutex != nullptr &&
       ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (clear_data_requested) {
+      std::cerr << "wyd is currently running. Quit wyd before clearing data."
+                << std::endl;
+      ::CloseHandle(single_instance_mutex);
+      ::CoUninitialize();
+      return EXIT_FAILURE;
+    }
+
     if (second_instance_message != 0) {
       ::PostMessage(HWND_BROADCAST, second_instance_message, 0, 0);
     }
@@ -41,9 +59,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   flutter::DartProject project(L"data");
-
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 

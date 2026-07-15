@@ -1,5 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../domain/domain.dart';
 import '../layout_metrics.dart';
 import 'report_controller.dart';
 
@@ -42,7 +46,12 @@ class _ReportViewState extends State<ReportView> {
   @override
   Widget build(BuildContext context) {
     final report = _state.report;
-    final selectedDate = _state.selectedDate;
+    final selection = _state.selection;
+    final dateRange = _state.dateRange;
+    final rowKeyPrefix = dateRange == null
+        ? 'report'
+        : '${dateRange.startLocalDateInclusive.toIso8601String()}-'
+              '${dateRange.endLocalDateExclusive.toIso8601String()}';
     final metrics = WydLayoutMetrics.of(context);
     final sectionGap = metrics.space(0.75);
 
@@ -54,16 +63,22 @@ class _ReportViewState extends State<ReportView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              _RangePresetSelector(
+                value: selection?.preset ?? ReportRangePreset.day,
+                loading: _state.loading,
+                onChanged: widget.controller.selectPreset,
+              ),
+              SizedBox(height: metrics.space(0.25)),
               _DateHeader(
-                title: selectedDate == null
+                title: dateRange == null
                     ? 'Report'
-                    : _formatDate(selectedDate),
+                    : _formatRange(dateRange, _state.today),
                 loading: _state.loading,
                 canGoNext: _state.canGoNext,
-                onPrevious: widget.controller.previousDay,
-                onNext: widget.controller.nextDay,
+                onPrevious: widget.controller.previousWindow,
+                onNext: widget.controller.nextWindow,
               ),
-              SizedBox(height: sectionGap),
+              SizedBox(height: metrics.space(0.5)),
               if (_state.loading)
                 const Expanded(
                   child: Center(child: CircularProgressIndicator()),
@@ -81,7 +96,7 @@ class _ReportViewState extends State<ReportView> {
                   child: _ReportStatus(
                     icon: Icons.timer_off_outlined,
                     title: 'No tracked time.',
-                    message: 'Tracked time for this day will appear here.',
+                    message: 'Tracked time for this range will appear here.',
                   ),
                 )
               else ...[
@@ -97,9 +112,12 @@ class _ReportViewState extends State<ReportView> {
                           const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final row = report.rows[index];
-                        return ListTile(
-                          title: Text(row.taskText),
-                          trailing: Text(formatReportDuration(row.duration)),
+                        return _ReportRowTile(
+                          key: ValueKey(
+                            '$rowKeyPrefix-${row.taskTextNormalized}',
+                          ),
+                          row: row,
+                          controller: widget.controller,
                         );
                       },
                     ),
@@ -118,6 +136,324 @@ class _ReportViewState extends State<ReportView> {
       setState(() => _state = widget.controller.state);
     }
   }
+}
+
+class _RangePresetSelector extends StatelessWidget {
+  const _RangePresetSelector({
+    required this.value,
+    required this.loading,
+    required this.onChanged,
+  });
+
+  final ReportRangePreset value;
+  final bool loading;
+  final ValueChanged<ReportRangePreset> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<ReportRangePreset>(
+      key: ValueKey(value),
+      initialValue: value,
+      decoration: const InputDecoration(
+        labelText: 'Range',
+        border: OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: ReportRangePreset.values
+          .map(
+            (preset) => DropdownMenuItem(
+              value: preset,
+              child: Text(_presetLabel(preset)),
+            ),
+          )
+          .toList(),
+      onChanged: loading
+          ? null
+          : (preset) {
+              if (preset != null) {
+                onChanged(preset);
+              }
+            },
+    );
+  }
+}
+
+class _ReportRowTile extends StatefulWidget {
+  const _ReportRowTile({
+    required this.row,
+    required this.controller,
+    super.key,
+  });
+
+  final ReportRow row;
+  final ReportController controller;
+
+  @override
+  State<_ReportRowTile> createState() => _ReportRowTileState();
+}
+
+class _ReportRowTileState extends State<_ReportRowTile> {
+  final TextEditingController _tagController = TextEditingController();
+  final FocusNode _tagFocusNode = FocusNode();
+
+  bool _adding = false;
+  bool _submitting = false;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _tagFocusNode.addListener(_tagFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _tagFocusNode.removeListener(_tagFocusChanged);
+    _tagFocusNode.dispose();
+    _tagController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+    final textTheme = Theme.of(context).textTheme;
+    final chips = <Widget>[
+      for (final tag in widget.row.tags)
+        InputChip(
+          label: Text(tag.text),
+          onDeleted: _submitting ? null : () => unawaited(_removeTag(tag)),
+          deleteButtonTooltipMessage: 'Remove tag ${tag.text}',
+        ),
+      _adding ? _buildTagInput(context, metrics) : _buildAddChip(),
+    ];
+
+    return Padding(
+      padding: metrics.insetsAll(1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  widget.row.taskText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.titleMedium,
+                ),
+              ),
+              SizedBox(width: metrics.space(1)),
+              Text(
+                formatReportDuration(widget.row.duration),
+                style: textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          SizedBox(height: metrics.space(0.5)),
+          Wrap(
+            spacing: metrics.space(0.5),
+            runSpacing: metrics.space(0.25),
+            children: chips,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAddChip() {
+    return ActionChip(
+      avatar: const Icon(Icons.add),
+      label: const Text('Add tag'),
+      onPressed: _submitting ? null : _startAdding,
+    );
+  }
+
+  Widget _buildTagInput(BuildContext context, WydLayoutMetrics metrics) {
+    return SizedBox(
+      width: metrics.maxWidth(12, min: 160),
+      child: Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.escape): _CancelTagInputIntent(),
+        },
+        child: Actions(
+          actions: {
+            _CancelTagInputIntent: CallbackAction<_CancelTagInputIntent>(
+              onInvoke: (_) {
+                _cancelAdding();
+                return null;
+              },
+            ),
+          },
+          child: TextField(
+            controller: _tagController,
+            focusNode: _tagFocusNode,
+            autofocus: true,
+            enabled: !_submitting,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              isDense: true,
+              labelText: 'New tag',
+              errorText: _errorText,
+              suffixIcon: _submitting
+                  ? Padding(
+                      padding: metrics.insetsAll(0.75),
+                      child: const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : IconButton(
+                      tooltip: 'Add tag',
+                      onPressed: () => unawaited(_submitTag()),
+                      icon: const Icon(Icons.check),
+                    ),
+            ),
+            onChanged: (_) {
+              if (_errorText != null) {
+                setState(() => _errorText = null);
+              }
+            },
+            onSubmitted: (_) => unawaited(_submitTag()),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _startAdding() {
+    setState(() {
+      _adding = true;
+      _errorText = null;
+      _tagController.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _tagFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _cancelAdding() {
+    if (!_adding || _submitting) {
+      return;
+    }
+
+    setState(() {
+      _adding = false;
+      _errorText = null;
+      _tagController.clear();
+    });
+  }
+
+  Future<void> _submitTag() async {
+    if (_submitting) {
+      return;
+    }
+
+    late final TaskTag draft;
+    try {
+      draft = TaskTag.fromInput(_tagController.text);
+    } on TaskTagValidationException catch (error) {
+      setState(() => _errorText = error.message);
+      return;
+    }
+
+    final duplicate = widget.row.tags.any(
+      (tag) => tag.normalized == draft.normalized,
+    );
+    if (duplicate) {
+      setState(() => _errorText = 'Tag already exists.');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _errorText = null;
+    });
+
+    try {
+      await widget.controller.addTag(
+        taskTextNormalized: widget.row.taskTextNormalized,
+        tagText: draft.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _adding = false;
+        _submitting = false;
+        _tagController.clear();
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submitting = false;
+        _errorText = error.toString();
+      });
+    }
+  }
+
+  Future<void> _removeTag(TaskTag tag) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await widget.controller.removeTag(
+        taskTextNormalized: widget.row.taskTextNormalized,
+        tag: tag,
+      );
+      if (!mounted) {
+        return;
+      }
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text('Removed tag "${tag.text}".'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => unawaited(_restoreTag(tag)),
+          ),
+        ),
+      );
+    } catch (error) {
+      _showSnackBar('Unable to remove tag: $error');
+    }
+  }
+
+  Future<void> _restoreTag(TaskTag tag) async {
+    try {
+      await widget.controller.addTag(
+        taskTextNormalized: widget.row.taskTextNormalized,
+        tagText: tag.text,
+      );
+    } catch (error) {
+      _showSnackBar('Unable to restore tag: $error');
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _tagFocusChanged() {
+    if (!_tagFocusNode.hasFocus &&
+        _adding &&
+        !_submitting &&
+        _tagController.text.isEmpty) {
+      _cancelAdding();
+    }
+  }
+}
+
+final class _CancelTagInputIntent extends Intent {
+  const _CancelTagInputIntent();
 }
 
 class _DateHeader extends StatelessWidget {
@@ -146,7 +482,7 @@ class _DateHeader extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              tooltip: 'Previous day',
+              tooltip: 'Previous period',
               onPressed: loading ? null : onPrevious,
               icon: const Icon(Icons.chevron_left),
             ),
@@ -158,7 +494,7 @@ class _DateHeader extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: 'Next day',
+              tooltip: 'Next period',
               onPressed: loading || !canGoNext ? null : onNext,
               icon: const Icon(Icons.chevron_right),
             ),
@@ -186,7 +522,7 @@ class _TotalCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Tracked today',
+              'Tracked in range',
               style: Theme.of(context).textTheme.labelLarge,
             ),
             SizedBox(height: metrics.space(0.25)),
@@ -263,3 +599,27 @@ String _formatDate(DateTime date) {
   final day = date.day.toString().padLeft(2, '0');
   return '${date.year}-$month-$day';
 }
+
+String _formatRange(ReportDateRange range, DateTime? today) {
+  final start = range.startLocalDateInclusive;
+  var end = DateTime(
+    range.endLocalDateExclusive.year,
+    range.endLocalDateExclusive.month,
+    range.endLocalDateExclusive.day - 1,
+  );
+  if (today != null && end.isAfter(today)) {
+    end = today;
+  }
+  if (start == end) {
+    return _formatDate(start);
+  }
+  return '${_formatDate(start)} - ${_formatDate(end)}';
+}
+
+String _presetLabel(ReportRangePreset preset) => switch (preset) {
+  ReportRangePreset.day => 'Day',
+  ReportRangePreset.week => 'Week',
+  ReportRangePreset.month => 'Month',
+  ReportRangePreset.quarter => 'Quarter',
+  ReportRangePreset.year => 'Year',
+};

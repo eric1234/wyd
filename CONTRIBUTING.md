@@ -57,6 +57,16 @@ behavior, startup behavior, or anything that affects user privacy.
    flutter run -d windows
    ```
 
+   To clear local SQLite data during development, run the matching command. If
+   `wyd` is still running, the command exits with an error instead of clearing
+   data:
+
+   ```bash
+   flutter run -d linux -a --clear-data
+   flutter run -d macos -a --clear-data
+   flutter run -d windows -a --clear-data
+   ```
+
 6. Build a release binary:
 
    ```bash
@@ -67,6 +77,22 @@ behavior, startup behavior, or anything that affects user privacy.
 
    The built apps will be placed under `build/linux/`, `build/macos/`, and
    `build/windows/`.
+
+## Versioning
+
+`pubspec.yaml` is the source of truth for the app version. Use the
+`major.minor.patch+build` format, such as `1.0.0+1`.
+
+- `major.minor.patch` is the user-facing product version.
+- `major` is for substantial direction, workflow, or compatibility changes.
+- `minor` is for user-visible features and meaningful improvements.
+- `patch` is for bug fixes, security fixes, packaging fixes, and data integrity
+  fixes.
+- `build` is the monotonically increasing artifact/build identifier.
+
+Tag releases as `vX.Y.Z`. Use release branches such as `release/1.0` only when a
+released line needs hotfixes after `main` has moved on. Keep the SQLite database
+schema version separate from the product version.
 
 ## Project Structure
 

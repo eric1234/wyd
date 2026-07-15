@@ -9,8 +9,9 @@ import '../../domain/domain.dart';
 final class AppDatabase {
   AppDatabase._(this.database);
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
   static const databaseFileName = 'wyd.sqlite';
+  static const _databaseSidecarSuffixes = ['-wal', '-shm', '-journal'];
 
   static bool _ffiInitialized = false;
 
@@ -64,6 +65,30 @@ final class AppDatabase {
     final directory = await getApplicationSupportDirectory();
     await Directory(directory.path).create(recursive: true);
     return p.join(directory.path, databaseFileName);
+  }
+
+  static List<String> databaseFilePathsFor(String databasePath) {
+    return [
+      databasePath,
+      for (final suffix in _databaseSidecarSuffixes) '$databasePath$suffix',
+    ];
+  }
+
+  static Future<void> deleteDatabaseFiles(String databasePath) async {
+    for (final filePath in databaseFilePathsFor(databasePath)) {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        continue;
+      }
+
+      try {
+        await file.delete();
+      } on FileSystemException {
+        if (await file.exists()) {
+          rethrow;
+        }
+      }
+    }
   }
 
   Future<T> transaction<T>(Future<T> Function(Transaction transaction) action) {
@@ -143,6 +168,7 @@ CREATE TABLE app_state (
     });
 
     await _createSettingsTable(database);
+    await _createTaskTagsTable(database);
   }
 
   static Future<void> _upgradeDatabase(
@@ -160,6 +186,11 @@ CREATE TABLE app_state (
     if (currentVersion < 2) {
       await _upgradeToV2(database);
       currentVersion = 2;
+    }
+
+    if (currentVersion < 3) {
+      await _upgradeToV3(database);
+      currentVersion = 3;
     }
 
     if (currentVersion == newVersion) {
@@ -195,6 +226,10 @@ FROM settings_v1
     await database.execute('DROP TABLE settings_v1');
   }
 
+  static Future<void> _upgradeToV3(Database database) async {
+    await _createTaskTagsTable(database);
+  }
+
   static Future<void> _createSettingsTable(Database database) async {
     await database.execute('''
 CREATE TABLE settings (
@@ -206,6 +241,26 @@ CREATE TABLE settings (
   start_at_login INTEGER NOT NULL CHECK(start_at_login IN (0, 1)),
   CHECK (reminder_interval_minutes >= response_timeout_minutes)
 )
+''');
+  }
+
+  static Future<void> _createTaskTagsTable(Database database) async {
+    await database.execute('''
+CREATE TABLE task_tags (
+  task_text_normalized TEXT NOT NULL,
+  tag_text TEXT NOT NULL,
+  tag_text_normalized TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  PRIMARY KEY (task_text_normalized, tag_text_normalized),
+  CHECK (length(task_text_normalized) > 0),
+  CHECK (length(tag_text) > 0 AND length(tag_text) <= ${TaskTag.maxLength}),
+  CHECK (length(tag_text_normalized) > 0 AND length(tag_text_normalized) <= ${TaskTag.maxLength})
+)
+''');
+
+    await database.execute('''
+CREATE INDEX idx_task_tags_tag_text_normalized
+ON task_tags (tag_text_normalized, task_text_normalized)
 ''');
   }
 }

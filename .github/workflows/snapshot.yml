@@ -143,23 +143,11 @@ jobs:
           Compress-Archive -Path dist/wyd -DestinationPath "dist/${{ matrix.asset }}"
           Remove-Item dist/wyd -Recurse -Force
 
-      - name: Generate checksum
-        shell: bash
-        run: |
-          cd dist
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
-          else
-            shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
-          fi
-
       - name: Upload snapshot artifact
         uses: actions/upload-artifact@v4
         with:
           name: snapshot-${{ matrix.platform }}
-          path: |
-            dist/${{ matrix.asset }}
-            dist/${{ matrix.asset }}.sha256
+          path: dist/${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 2
 
@@ -186,16 +174,13 @@ jobs:
         run: |
           assets=(
             wyd-snapshot-linux-x64.zip
-            wyd-snapshot-linux-x64.zip.sha256
             wyd-snapshot-macos-arm64.zip
-            wyd-snapshot-macos-arm64.zip.sha256
             wyd-snapshot-windows-x64.zip
-            wyd-snapshot-windows-x64.zip.sha256
           )
           for asset in "${assets[@]}"; do
             test -s "dist/$asset"
           done
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 6
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
 
       - name: Create or update snapshot prerelease
         shell: bash

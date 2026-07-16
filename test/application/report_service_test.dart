@@ -241,8 +241,7 @@ void main() {
 
       await controller.open();
       await controller.previousWindow();
-      controller.refreshForShow();
-      await pumpEventQueue();
+      await controller.refreshForShow();
 
       expect(controller.state.selection!.anchorDate, previousDay);
       expect(controller.state.isOpen, isTrue);
@@ -257,8 +256,7 @@ void main() {
       await controller.open();
       await controller.previousWindow();
       controller.close();
-      controller.refreshForShow();
-      await pumpEventQueue();
+      await controller.refreshForShow();
 
       expect(controller.state.selection!.anchorDate, today);
       expect(controller.state.isOpen, isTrue);
@@ -317,6 +315,103 @@ void main() {
       await firstLoad;
       expect(controller.state.selection!.anchorDate, secondDate);
       expect(controller.state.report!.rows.single.taskText, 'Second result');
+    });
+
+    test(
+      'close invalidates refresh while visualization load is pending',
+      () async {
+        final delayedVisualization = Completer<ReportVisualizationData>();
+        var visualizationLoads = 0;
+        final loader = _StaticActivityReportLoader(
+          report: _report(DateTime(2026, 1, 2), 'Task'),
+          visualizationLoader: () {
+            visualizationLoads += 1;
+            if (visualizationLoads == 1) {
+              return Future.value(_defaultVisualizationData());
+            }
+            return delayedVisualization.future;
+          },
+        );
+        final controller = ReportController(loader);
+        addTearDown(controller.dispose);
+        await controller.open();
+
+        final refresh = controller.refreshForShow();
+        controller.close();
+        delayedVisualization.complete(_defaultVisualizationData());
+        await refresh;
+
+        expect(controller.state.isOpen, isFalse);
+      },
+    );
+
+    test('older preference failure does not roll back a newer edit', () async {
+      final saveRequests = <Completer<void>>[];
+      final loader = _StaticActivityReportLoader(
+        report: _report(DateTime(2026, 1, 2), 'Task'),
+        preferenceSaver: (preferences) {
+          final request = Completer<void>();
+          saveRequests.add(request);
+          return request.future;
+        },
+      );
+      final controller = ReportController(loader);
+      addTearDown(controller.dispose);
+      await controller.open();
+
+      final firstSave = controller.setGroupingMode(ReportGroupingMode.tags);
+      final secondSave = controller.setTagLevel(0, ['client']);
+      final latestPreferences = ReportVisualizationPreferences(
+        mode: ReportGroupingMode.tags,
+        tagLevels: [
+          ReportTagLevel(['client']),
+        ],
+      );
+      expect(controller.state.visualizationPreferences, latestPreferences);
+
+      saveRequests.first.completeError(StateError('older save failed'));
+      await pumpEventQueue();
+
+      expect(controller.state.visualizationPreferences, latestPreferences);
+      expect(controller.state.preferenceErrorMessage, isNull);
+
+      saveRequests.last.complete();
+      await Future.wait([firstSave, secondSave]);
+      expect(controller.state.visualizationPreferences, latestPreferences);
+    });
+
+    test('latest preference failure rolls back to persisted state', () async {
+      final saveRequests = <Completer<void>>[];
+      final loader = _StaticActivityReportLoader(
+        report: _report(DateTime(2026, 1, 2), 'Task'),
+        preferenceSaver: (preferences) {
+          final request = Completer<void>();
+          saveRequests.add(request);
+          return request.future;
+        },
+      );
+      final controller = ReportController(loader);
+      addTearDown(controller.dispose);
+      await controller.open();
+
+      final firstPreferences = ReportVisualizationPreferences(
+        mode: ReportGroupingMode.tags,
+        tagLevels: [ReportTagLevel(const [])],
+      );
+      final firstSave = controller.setGroupingMode(ReportGroupingMode.tags);
+      saveRequests.first.complete();
+      await firstSave;
+      expect(controller.state.visualizationPreferences, firstPreferences);
+
+      final secondSave = controller.setTagLevel(0, ['client']);
+      saveRequests.last.completeError(StateError('latest save failed'));
+      await secondSave;
+
+      expect(controller.state.visualizationPreferences, firstPreferences);
+      expect(
+        controller.state.preferenceErrorMessage,
+        contains('latest save failed'),
+      );
     });
 
     test('updates current report tags after add and remove', () async {
@@ -413,6 +508,19 @@ final class _DelayedActivityReportLoader implements ActivityReportLoader {
   final List<_ReportRequest> requests = [];
 
   @override
+  Future<ReportVisualizationData> loadVisualizationData() async {
+    return ReportVisualizationData(
+      availableTags: const [],
+      preferences: ReportVisualizationPreferences.defaults,
+    );
+  }
+
+  @override
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  ) async {}
+
+  @override
   DateTime todayLocalDate() => today;
 
   @override
@@ -444,10 +552,31 @@ final class _DelayedActivityReportLoader implements ActivityReportLoader {
 }
 
 final class _StaticActivityReportLoader implements ActivityReportLoader {
-  _StaticActivityReportLoader({required this.report, this.addError});
+  _StaticActivityReportLoader({
+    required this.report,
+    this.addError,
+    this.visualizationLoader,
+    this.preferenceSaver,
+  });
 
   final ActivityReport report;
   final Object? addError;
+  final Future<ReportVisualizationData> Function()? visualizationLoader;
+  final Future<void> Function(ReportVisualizationPreferences preferences)?
+  preferenceSaver;
+
+  @override
+  Future<ReportVisualizationData> loadVisualizationData() {
+    return visualizationLoader?.call() ??
+        Future.value(_defaultVisualizationData());
+  }
+
+  @override
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  ) {
+    return preferenceSaver?.call(preferences) ?? Future.value();
+  }
 
   @override
   DateTime todayLocalDate() => DateTime(2026, 1, 2);
@@ -498,3 +627,10 @@ ReportDateRange _dayRange(DateTime date) => ReportDateRange(
   startLocalDateInclusive: date,
   endLocalDateExclusive: DateTime(date.year, date.month, date.day + 1),
 );
+
+ReportVisualizationData _defaultVisualizationData() {
+  return ReportVisualizationData(
+    availableTags: const [],
+    preferences: ReportVisualizationPreferences.defaults,
+  );
+}

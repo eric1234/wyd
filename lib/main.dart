@@ -287,7 +287,10 @@ void _refreshRoleForShow(
 }) {
   switch (role) {
     case WindowRole.report:
-      reportController?.refreshForShow();
+      final report = reportController;
+      if (report != null) {
+        unawaited(report.refreshForShow());
+      }
     case WindowRole.settings:
       settingsController?.refreshForShow();
     case WindowRole.about:

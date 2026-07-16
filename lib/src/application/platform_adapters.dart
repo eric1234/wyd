@@ -88,8 +88,8 @@ final class WindowRoleConfiguration {
       WindowRole.report => const WindowRoleConfiguration(
         role: WindowRole.report,
         title: 'Report',
-        width: 720,
-        height: 560,
+        width: 1040,
+        height: 680,
       ),
       WindowRole.settings => const WindowRoleConfiguration(
         role: WindowRole.settings,

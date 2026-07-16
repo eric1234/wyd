@@ -42,8 +42,15 @@ jobs:
             --json body \
             --jq '.body | capture("<!-- snapshot-commit: (?<sha>[0-9a-f]{40}) -->").sha' \
             2>/dev/null || true)"
+          release_draft="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft' \
+            2>/dev/null || true)"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
-          if [[ "$commit" == "$published" && "$commit" == "$release_commit" ]]; then
+          if [[ "$commit" == "$published" && \
+                "$commit" == "$release_commit" && \
+                "$release_draft" == 'false' ]]; then
             echo "should-build=false" >> "$GITHUB_OUTPUT"
             echo "Snapshot already represents $commit."
           else
@@ -138,6 +145,39 @@ jobs:
           $bundle = 'build/windows/x64/runner/Release'
           if (-not (Test-Path "$bundle/wyd.exe" -PathType Leaf)) { throw 'Missing wyd.exe' }
           if (-not (Test-Path "$bundle/data" -PathType Container)) { throw 'Missing data directory' }
+
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vsWhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest `
+            -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            throw 'Unable to locate the Visual Studio installation'
+          }
+
+          $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
+          $crtDirectory = Get-ChildItem $redistRoot -Directory |
+            Sort-Object { [version]$_.Name } -Descending |
+            ForEach-Object {
+              $architectureDirectory = Join-Path $_.FullName 'x64'
+              if (Test-Path $architectureDirectory -PathType Container) {
+                Get-ChildItem $architectureDirectory -Directory `
+                  -Filter 'Microsoft.VC*.CRT' |
+                  Sort-Object Name -Descending |
+                  Select-Object -First 1
+              }
+            } |
+            Select-Object -First 1
+          if (-not $crtDirectory) { throw 'Unable to locate the VC++ runtime' }
+
+          @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') |
+            ForEach-Object {
+              $runtime = Join-Path $crtDirectory.FullName $_
+              if (-not (Test-Path $runtime -PathType Leaf)) {
+                throw "Missing VC++ runtime: $_"
+              }
+              Copy-Item $runtime $bundle
+            }
+
           New-Item -ItemType Directory -Force dist/wyd | Out-Null
           Copy-Item "$bundle/*" dist/wyd -Recurse
           Compress-Archive -Path dist/wyd -DestinationPath "dist/${{ matrix.asset }}"
@@ -182,7 +222,8 @@ jobs:
           done
           test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
 
-      - name: Create or update snapshot prerelease
+      - name: Stage snapshot candidate
+        id: candidate
         shell: bash
         run: |
           short_commit="${SNAPSHOT_COMMIT:0:7}"
@@ -196,47 +237,56 @@ jobs:
           - Platforms: Linux x64, macOS arm64, Windows x64
 
           These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
+
+          <!-- snapshot-commit: $SNAPSHOT_COMMIT -->
           EOF
 
-          if gh release view snapshot --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit snapshot \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Latest snapshot" \
-              --notes-file "$notes" \
-              --draft \
-              --prerelease \
-              --latest=false
-          else
-            gh release create snapshot \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$SNAPSHOT_COMMIT" \
-              --title "Latest snapshot" \
-              --notes-file "$notes" \
-              --prerelease \
-              --draft \
-              --latest=false
-          fi
-
-          while IFS= read -r asset; do
-            gh release delete-asset snapshot "$asset" \
+          if gh release view snapshot-candidate --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete snapshot-candidate \
               --repo "$GITHUB_REPOSITORY" \
               --yes
-          done < <(gh release view snapshot \
+          fi
+
+          gh release create snapshot-candidate \
             --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[].name')
+            --target "$SNAPSHOT_COMMIT" \
+            --title "Latest snapshot" \
+            --notes-file "$notes" \
+            --prerelease \
+            --draft \
+            --latest=false
 
-          gh release upload snapshot dist/* --repo "$GITHUB_REPOSITORY"
+          gh release upload snapshot-candidate dist/* --repo "$GITHUB_REPOSITORY"
+          release_id="$(gh release view snapshot-candidate \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId \
+            --jq '.databaseId')"
+          echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
 
-      - name: Verify release and record published commit
+      - name: Verify and promote snapshot
         shell: bash
+        env:
+          CANDIDATE_RELEASE_ID: ${{ steps.candidate.outputs.release-id }}
         run: |
           expected="$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)"
-          actual="$(gh release view snapshot \
-            --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets[].name' | sort)"
+          actual="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${CANDIDATE_RELEASE_ID}" \
+            --jq '.assets[] | select(.state == "uploaded") | .name' | sort)"
           test "$actual" = "$expected"
+
+          if gh release view snapshot --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --yes
+          fi
+
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${CANDIDATE_RELEASE_ID}" \
+            -f tag_name='snapshot' \
+            -f name='Latest snapshot' \
+            -F draft=true \
+            -F prerelease=true \
+            -f make_latest='false' >/dev/null
 
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" >/dev/null 2>&1; then
             gh api --method PATCH \
@@ -250,20 +300,20 @@ jobs:
               -f sha="$SNAPSHOT_COMMIT" >/dev/null
           fi
 
-          gh release edit snapshot \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false \
-            --prerelease \
-            --latest=false
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" \
+            --jq '.object.sha')" = "$SNAPSHOT_COMMIT"
 
-          notes="$(mktemp)"
-          gh release view snapshot \
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${CANDIDATE_RELEASE_ID}" \
+            -F draft=false \
+            -F prerelease=true \
+            -f make_latest='false' >/dev/null
+
+          test "$(gh release view snapshot \
             --repo "$GITHUB_REPOSITORY" \
-            --json body \
-            --jq '.body' > "$notes"
-          printf '\n<!-- snapshot-commit: %s -->\n' "$SNAPSHOT_COMMIT" >> "$notes"
-          gh release edit snapshot \
-            --repo "$GITHUB_REPOSITORY" \
-            --notes-file "$notes" \
-            --prerelease \
-            --latest=false
+            --json isDraft \
+            --jq '.isDraft')" = 'false'
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" \
+            --jq '.object.sha')" = "$SNAPSHOT_COMMIT"

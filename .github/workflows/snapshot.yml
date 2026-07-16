@@ -222,10 +222,15 @@ jobs:
           done
           test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
 
-      - name: Stage snapshot candidate
-        id: candidate
+      - name: Stage snapshot assets
+        id: release
         shell: bash
         run: |
+          assets=(
+            wyd-snapshot-linux-x64.zip
+            wyd-snapshot-macos-arm64.zip
+            wyd-snapshot-windows-x64.zip
+          )
           short_commit="${SNAPSHOT_COMMIT:0:7}"
           built_at="$(date -u +'%Y-%m-%d %H:%M UTC')"
           notes="$(mktemp)"
@@ -241,52 +246,117 @@ jobs:
           <!-- snapshot-commit: $SNAPSHOT_COMMIT -->
           EOF
 
-          if gh release view snapshot-candidate --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete snapshot-candidate \
+          if gh release view snapshot --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_id="$(gh release view snapshot \
               --repo "$GITHUB_REPOSITORY" \
-              --yes
+              --json databaseId \
+              --jq '.databaseId')"
+          else
+            gh release create snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SNAPSHOT_COMMIT" \
+              --title "Latest snapshot" \
+              --notes-file "$notes" \
+              --prerelease \
+              --draft \
+              --latest=false
+            release_id="$(gh release view snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --json databaseId \
+              --jq '.databaseId')"
           fi
-
-          gh release create snapshot-candidate \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$SNAPSHOT_COMMIT" \
-            --title "Latest snapshot" \
-            --notes-file "$notes" \
-            --prerelease \
-            --draft \
-            --latest=false
-
-          gh release upload snapshot-candidate dist/* --repo "$GITHUB_REPOSITORY"
-          release_id="$(gh release view snapshot-candidate \
-            --repo "$GITHUB_REPOSITORY" \
-            --json databaseId \
-            --jq '.databaseId')"
           echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
 
-      - name: Verify and promote snapshot
+          asset_id() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              --jq ".assets[] | select(.name == \"$1\") | .id"
+          }
+
+          for asset in "${assets[@]}"; do
+            stable_id="$(asset_id "$asset")"
+            previous_id="$(asset_id "$asset.previous")"
+            if [[ -n "$previous_id" ]]; then
+              if [[ -n "$stable_id" ]]; then
+                gh api --method DELETE \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}"
+              else
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}" \
+                  -f name="$asset" >/dev/null
+              fi
+            fi
+
+            next_id="$(asset_id "$asset.next")"
+            if [[ -n "$next_id" ]]; then
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}"
+            fi
+          done
+
+          mkdir -p staged
+          for asset in "${assets[@]}"; do
+            cp "dist/$asset" "staged/$asset.next"
+          done
+          gh release upload snapshot staged/* --repo "$GITHUB_REPOSITORY"
+
+          for asset in "${assets[@]}"; do
+            next_id="$(asset_id "$asset.next")"
+            test -n "$next_id"
+            expected_digest="sha256:$(sha256sum "dist/$asset" | cut -d' ' -f1)"
+            actual_digest="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}" \
+              --jq '.digest')"
+            test "$actual_digest" = "$expected_digest"
+          done
+
+      - name: Promote snapshot assets
         shell: bash
         env:
-          CANDIDATE_RELEASE_ID: ${{ steps.candidate.outputs.release-id }}
+          RELEASE_ID: ${{ steps.release.outputs.release-id }}
         run: |
-          expected="$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)"
+          assets=(
+            wyd-snapshot-linux-x64.zip
+            wyd-snapshot-macos-arm64.zip
+            wyd-snapshot-windows-x64.zip
+          )
+          asset_id() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              --jq ".assets[] | select(.name == \"$1\") | .id"
+          }
+
+          for asset in "${assets[@]}"; do
+            stable_id="$(asset_id "$asset")"
+            next_id="$(asset_id "$asset.next")"
+            test -n "$next_id"
+
+            if [[ -n "$stable_id" ]]; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                -f name="$asset.previous" >/dev/null
+            fi
+
+            if ! gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}" \
+              -f name="$asset" >/dev/null; then
+              if [[ -n "$stable_id" ]]; then
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                  -f name="$asset" >/dev/null
+              fi
+              exit 1
+            fi
+
+            if [[ -n "$stable_id" ]]; then
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}"
+            fi
+          done
+
+          expected="$(printf '%s\n' "${assets[@]}" | sort)"
           actual="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/${CANDIDATE_RELEASE_ID}" \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
             --jq '.assets[] | select(.state == "uploaded") | .name' | sort)"
           test "$actual" = "$expected"
-
-          if gh release view snapshot --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete snapshot \
-              --repo "$GITHUB_REPOSITORY" \
-              --yes
-          fi
-
-          gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/releases/${CANDIDATE_RELEASE_ID}" \
-            -f tag_name='snapshot' \
-            -f name='Latest snapshot' \
-            -F draft=true \
-            -F prerelease=true \
-            -f make_latest='false' >/dev/null
 
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" >/dev/null 2>&1; then
             gh api --method PATCH \
@@ -305,7 +375,21 @@ jobs:
             --jq '.object.sha')" = "$SNAPSHOT_COMMIT"
 
           gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/releases/${CANDIDATE_RELEASE_ID}" \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -f tag_name='snapshot' \
+            -f name='Latest snapshot' \
+            -f body="$(cat <<EOF
+          Automated, unsigned development snapshot of [\`${SNAPSHOT_COMMIT:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${SNAPSHOT_COMMIT}).
+
+          - Built: $(date -u +'%Y-%m-%d %H:%M UTC')
+          - Flutter: $FLUTTER_VERSION
+          - Platforms: Linux x64, macOS arm64, Windows x64
+
+          These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
+
+          <!-- snapshot-commit: $SNAPSHOT_COMMIT -->
+          EOF
+          )" \
             -F draft=false \
             -F prerelease=true \
             -f make_latest='false' >/dev/null

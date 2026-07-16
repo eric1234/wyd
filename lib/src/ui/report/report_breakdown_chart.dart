@@ -534,10 +534,7 @@ final class _ReportChartPalette {
     final sortedRoots = roots.toList()
       ..sort((left, right) => left.path.compareTo(right.path));
     for (final root in sortedRoots) {
-      var hue = _stableHash(root.path) % 360.0;
-      while (usedHues.any((existing) => _hueDistance(existing, hue) < 28)) {
-        hue = (hue + 137.508) % 360;
-      }
+      final hue = _allocateHue(_stableHash(root.path) % 360.0, usedHues);
       usedHues.add(hue);
       final rootColor = HSLColor.fromAHSL(
         1,
@@ -556,10 +553,10 @@ final class _ReportChartPalette {
     }
     final childIdentities = childPathsByIdentity.keys.toList()..sort();
     for (final identity in childIdentities) {
-      var hue = _stableHash('level-2:$identity') % 360.0;
-      while (usedHues.any((existing) => _hueDistance(existing, hue) < 28)) {
-        hue = (hue + 137.508) % 360;
-      }
+      final hue = _allocateHue(
+        _stableHash('level-2:$identity') % 360.0,
+        usedHues,
+      );
       usedHues.add(hue);
       final color = HSLColor.fromAHSL(
         1,
@@ -575,6 +572,31 @@ final class _ReportChartPalette {
   }
 
   Color colorFor(String path) => _colorsByPath[path] ?? Colors.grey;
+}
+
+double _allocateHue(double seed, List<double> usedHues) {
+  const minimumDistance = 28.0;
+  const maximumAttempts = 16;
+  const goldenAngle = 137.508;
+  var candidate = seed;
+  var bestCandidate = seed;
+  var bestDistance = -1.0;
+  for (var attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    final nearestDistance = usedHues.isEmpty
+        ? 360.0
+        : usedHues
+              .map((usedHue) => _hueDistance(usedHue, candidate))
+              .reduce((left, right) => math.min(left, right).toDouble());
+    if (nearestDistance >= minimumDistance) {
+      return candidate;
+    }
+    if (nearestDistance > bestDistance) {
+      bestDistance = nearestDistance;
+      bestCandidate = candidate;
+    }
+    candidate = (candidate + goldenAngle) % 360;
+  }
+  return bestCandidate;
 }
 
 double _hueDistance(double left, double right) {

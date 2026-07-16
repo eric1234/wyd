@@ -97,6 +97,10 @@ final class ReportController extends ChangeNotifier {
   final ActivityReportLoader _service;
   ReportState _state = const ReportState();
   int _loadRequest = 0;
+  int _preferenceSaveRequest = 0;
+  int _persistedPreferenceRequest = 0;
+  ReportVisualizationPreferences _persistedVisualizationPreferences =
+      ReportVisualizationPreferences.defaults;
 
   ReportState get state => _state;
 
@@ -105,24 +109,28 @@ final class ReportController extends ChangeNotifier {
       return;
     }
 
-    await _loadVisualizationData();
-    await loadSelection(
+    final reportLoad = loadSelection(
       ReportSelection(
         preset: ReportRangePreset.day,
         anchorDate: _service.todayLocalDate(),
       ),
       isOpen: true,
     );
+    final visualizationLoad = _loadVisualizationData();
+    await Future.wait([reportLoad, visualizationLoad]);
   }
 
-  void refreshForShow() {
+  Future<void> refreshForShow() async {
     final selection = _state.isOpen
         ? _state.selection ?? _todaySelection()
         : _todaySelection();
-    unawaited(() async {
-      await _loadVisualizationData();
-      await loadSelection(selection, isOpen: true, clearReport: true);
-    }());
+    final reportLoad = loadSelection(
+      selection,
+      isOpen: true,
+      clearReport: true,
+    );
+    final visualizationLoad = _loadVisualizationData();
+    await Future.wait([reportLoad, visualizationLoad]);
   }
 
   void close() {
@@ -342,15 +350,23 @@ final class ReportController extends ChangeNotifier {
   }
 
   Future<void> _loadVisualizationData() async {
+    final preferenceRequest = _preferenceSaveRequest;
     final data = await _service.loadVisualizationData();
     final report = _state.report;
+    final preferences = preferenceRequest == _preferenceSaveRequest
+        ? data.preferences
+        : _state.visualizationPreferences ?? data.preferences;
+    if (preferenceRequest == _preferenceSaveRequest) {
+      _persistedVisualizationPreferences = data.preferences;
+      _persistedPreferenceRequest = preferenceRequest;
+    }
     _setState(
       _state.copyWith(
         availableTags: data.availableTags,
-        visualizationPreferences: data.preferences,
+        visualizationPreferences: preferences,
         breakdown: report == null
             ? _state.breakdown
-            : buildReportBreakdown(report, data.preferences),
+            : buildReportBreakdown(report, preferences),
       ),
     );
   }
@@ -358,9 +374,7 @@ final class ReportController extends ChangeNotifier {
   Future<void> _savePreferences(
     ReportVisualizationPreferences preferences,
   ) async {
-    final previous =
-        _state.visualizationPreferences ??
-        ReportVisualizationPreferences.defaults;
+    final request = ++_preferenceSaveRequest;
     final report = _state.report;
     _setState(
       _state.copyWith(
@@ -373,13 +387,22 @@ final class ReportController extends ChangeNotifier {
     );
     try {
       await _service.saveVisualizationPreferences(preferences);
+      if (request >= _persistedPreferenceRequest) {
+        _persistedVisualizationPreferences = preferences;
+        _persistedPreferenceRequest = request;
+      }
     } catch (error) {
+      if (request != _preferenceSaveRequest ||
+          _state.visualizationPreferences != preferences) {
+        return;
+      }
+      final persisted = _persistedVisualizationPreferences;
       _setState(
         _state.copyWith(
-          visualizationPreferences: previous,
+          visualizationPreferences: persisted,
           breakdown: report == null
               ? _state.breakdown
-              : buildReportBreakdown(report, previous),
+              : buildReportBreakdown(report, persisted),
           preferenceErrorMessage: 'Unable to save report grouping: $error',
         ),
       );

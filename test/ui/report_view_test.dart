@@ -298,7 +298,7 @@ void main() {
       expect(_selectedRange(tester), ReportRangePreset.week);
 
       controller.close();
-      controller.refreshForShow();
+      await controller.refreshForShow();
       await tester.pumpAndSettle();
 
       expect(_selectedRange(tester), ReportRangePreset.day);
@@ -373,8 +373,7 @@ void main() {
       ],
     );
 
-    controller.refreshForShow();
-    await Future<void>.delayed(Duration.zero);
+    await controller.refreshForShow();
 
     expect(controller.state.report!.rows.single.taskText, 'Fresh task');
     expect(controller.state.report!.totalDuration, const Duration(minutes: 45));

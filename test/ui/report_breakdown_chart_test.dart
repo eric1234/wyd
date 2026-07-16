@@ -41,6 +41,42 @@ void main() {
     expect(colorFor('tag:bar'), isNot(barBaz));
   });
 
+  testWidgets('large saturated palettes finish allocating colors', (
+    tester,
+  ) async {
+    final nodes = [
+      for (var index = 0; index < 20; index += 1)
+        ReportBreakdownNode(
+          id: 'tag:root-$index',
+          path: 'tag:root-$index',
+          label: 'Root $index',
+          duration: const Duration(minutes: 1),
+          children: [
+            ReportBreakdownNode(
+              id: 'tag:child-$index',
+              path: 'tag:root-$index/tag:child-$index',
+              label: 'Child $index',
+              duration: const Duration(minutes: 1),
+            ),
+          ],
+        ),
+    ];
+
+    await tester.pumpWidget(
+      _harness(
+        ReportBreakdown(
+          totalDuration: const Duration(minutes: 20),
+          nodes: nodes,
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-breakdown-color-tag:root-0')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('outer ring hovers level one and inner ring hovers level two', (
     tester,
   ) async {

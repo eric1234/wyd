@@ -174,10 +174,117 @@ void main() {
       expect(harness.inhibitors.single.released, isFalse);
     });
 
-    test('dispose cancels resources and releases inhibitor', () async {
+    test('serializes events while an acknowledgement is pending', () async {
+      final lockSource = LinuxDbusPowerEventAdapter.knownSources.firstWhere(
+        (source) => source.isLockSource,
+      );
+      final harness = await _Harness.create(lockSources: [lockSource]);
+      addTearDown(harness.dispose);
+      final occurrences = <PowerEventOccurrence>[];
+      final sleepCompleter = Completer<void>();
+      await harness.adapter.initializeAcknowledged((occurrence) async {
+        occurrences.add(occurrence);
+        if (occurrence.event == PowerEvent.sleep) {
+          await sleepCompleter.future;
+        }
+      });
+
+      harness.emitLogind(LinuxLogindSignalKind.prepareForSleep, true);
+      await _waitUntil(() => occurrences.isNotEmpty);
+      harness.emitLock(lockSource, true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(occurrences.map((occurrence) => occurrence.event), [
+        PowerEvent.sleep,
+      ]);
+
+      sleepCompleter.complete();
+      await _waitUntil(() => occurrences.length == 2);
+
+      expect(occurrences.map((occurrence) => occurrence.event), [
+        PowerEvent.sleep,
+        PowerEvent.lock,
+      ]);
+    });
+
+    test(
+      'callback failure releases inhibitor and preserves event chain',
+      () async {
+        final lockSource = LinuxDbusPowerEventAdapter.knownSources.firstWhere(
+          (source) => source.isLockSource,
+        );
+        final harness = await _Harness.create(lockSources: [lockSource]);
+        addTearDown(harness.dispose);
+        final occurrences = <PowerEventOccurrence>[];
+        await harness.adapter.initializeAcknowledged((occurrence) async {
+          occurrences.add(occurrence);
+          if (occurrence.event == PowerEvent.sleep) {
+            throw StateError('persistence failed');
+          }
+        });
+
+        harness.emitLogind(LinuxLogindSignalKind.prepareForSleep, true);
+        await harness.inhibitors.single.releasedFuture;
+        harness.emitLock(lockSource, true);
+        await _waitUntil(() => occurrences.length == 2);
+
+        expect(harness.inhibitors.single.released, isTrue);
+        expect(occurrences.map((occurrence) => occurrence.event), [
+          PowerEvent.sleep,
+          PowerEvent.lock,
+        ]);
+      },
+    );
+
+    test(
+      'reacquires inhibitor before acknowledging shutdown cancellation',
+      () async {
+        final reacquireCompleter = Completer<LinuxLogindInhibitor>();
+        var acquireRequests = 0;
+        final harness = await _Harness.create(
+          acquireInhibitor: (inhibitors) {
+            acquireRequests += 1;
+            if (acquireRequests == 1) {
+              final inhibitor = _FakeInhibitor();
+              inhibitors.add(inhibitor);
+              return Future.value(inhibitor);
+            }
+            return reacquireCompleter.future;
+          },
+        );
+        addTearDown(harness.dispose);
+        final occurrences = <PowerEventOccurrence>[];
+        await harness.adapter.initializeAcknowledged((occurrence) async {
+          occurrences.add(occurrence);
+        });
+
+        harness.emitLogind(LinuxLogindSignalKind.prepareForShutdown, true);
+        await harness.inhibitors.single.releasedFuture;
+        harness.emitLogind(LinuxLogindSignalKind.prepareForShutdown, false);
+        await _waitUntil(() => acquireRequests == 2);
+
+        expect(occurrences.map((occurrence) => occurrence.event), [
+          PowerEvent.shutdown,
+        ]);
+
+        final reacquiredInhibitor = _FakeInhibitor();
+        harness.inhibitors.add(reacquiredInhibitor);
+        reacquireCompleter.complete(reacquiredInhibitor);
+        await _waitUntil(() => occurrences.length == 2);
+
+        expect(occurrences.map((occurrence) => occurrence.event), [
+          PowerEvent.shutdown,
+          PowerEvent.shutdownCancelled,
+        ]);
+        expect(reacquiredInhibitor.released, isFalse);
+      },
+    );
+
+    test('dispose is idempotent and releases resources once', () async {
       final harness = await _Harness.create();
       await harness.adapter.initializeAcknowledged((_) async {});
 
+      await harness.adapter.dispose();
       await harness.adapter.dispose();
 
       expect(harness.inhibitors.single.released, isTrue);

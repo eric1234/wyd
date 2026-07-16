@@ -171,8 +171,8 @@ final class LinuxLogindLifecyclePowerAdapter
   Future<void> _eventChain = Future.value();
   bool _started = false;
   bool _disposed = false;
-  bool _shutdownPreparationInProgress = false;
-  int _transitionGeneration = 0;
+  bool _shutdownStartPendingCancellation = false;
+  int _inhibitorAcquisitionGeneration = 0;
 
   @override
   Stream<PowerEvent> get events => const Stream.empty();
@@ -252,19 +252,23 @@ final class LinuxLogindLifecyclePowerAdapter
 
     switch (signal.kind) {
       case LinuxLogindSignalKind.prepareForSleep:
-        await _handleSleepStarted();
+        await _handleTransitionStarted(PowerEvent.sleep);
       case LinuxLogindSignalKind.prepareForShutdown:
-        await _handleShutdownStarted();
+        await _handleTransitionStarted(
+          PowerEvent.shutdown,
+          tracksShutdownCancellation: true,
+        );
     }
   }
 
   Future<void> _handleLogindSignalEnded(LinuxLogindSignal signal) async {
     var shouldEmitShutdownCancelled = false;
     if (signal.kind == LinuxLogindSignalKind.prepareForShutdown) {
-      shouldEmitShutdownCancelled = _shutdownPreparationInProgress;
-      _shutdownPreparationInProgress = false;
+      shouldEmitShutdownCancelled = _shutdownStartPendingCancellation;
+      _shutdownStartPendingCancellation = false;
     }
 
+    // Restore delay protection before cancellation handling performs UI work.
     await _acquireInhibitorIfNeeded();
 
     if (!shouldEmitShutdownCancelled) {
@@ -291,32 +295,21 @@ final class LinuxLogindLifecyclePowerAdapter
     );
   }
 
-  Future<void> _handleSleepStarted() async {
-    _transitionGeneration += 1;
-    final occurredAtUtc = _nowUtc();
-    try {
-      await _onPowerEvent?.call(
-        PowerEventOccurrence(
-          event: PowerEvent.sleep,
-          occurredAtUtc: occurredAtUtc,
-        ),
-      );
-    } finally {
-      await _releaseInhibitor();
+  Future<void> _handleTransitionStarted(
+    PowerEvent event, {
+    bool tracksShutdownCancellation = false,
+  }) async {
+    _inhibitorAcquisitionGeneration += 1;
+    if (tracksShutdownCancellation) {
+      _shutdownStartPendingCancellation = true;
     }
-  }
 
-  Future<void> _handleShutdownStarted() async {
-    _transitionGeneration += 1;
-    final occurredAtUtc = _nowUtc();
-    _shutdownPreparationInProgress = true;
+    final occurrence = PowerEventOccurrence(
+      event: event,
+      occurredAtUtc: _nowUtc(),
+    );
     try {
-      await _onPowerEvent?.call(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdown,
-          occurredAtUtc: occurredAtUtc,
-        ),
-      );
+      await _onPowerEvent?.call(occurrence);
     } finally {
       await _releaseInhibitor();
     }
@@ -327,7 +320,7 @@ final class LinuxLogindLifecyclePowerAdapter
       return;
     }
     late final Future<LinuxLogindInhibitor> acquireFuture;
-    final transitionGeneration = _transitionGeneration;
+    final acquisitionGeneration = _inhibitorAcquisitionGeneration;
     try {
       acquireFuture = _acquireInhibitor();
     } catch (error, stackTrace) {
@@ -366,7 +359,7 @@ final class LinuxLogindLifecyclePowerAdapter
 
     if (_disposed ||
         _inhibitor != null ||
-        transitionGeneration != _transitionGeneration) {
+        acquisitionGeneration != _inhibitorAcquisitionGeneration) {
       await _releaseIgnoringErrors(inhibitor);
       return;
     }

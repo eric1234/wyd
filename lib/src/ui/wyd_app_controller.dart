@@ -210,32 +210,36 @@ final class WydAppController extends ChangeNotifier {
     DateTime? occurredAtUtc,
     required bool openPromptSynchronously,
   }) async {
-    if (event == PowerEvent.shutdown) {
-      await _prepareForSystemShutdown(occurredAtUtc: occurredAtUtc);
-      return;
+    switch (event) {
+      case PowerEvent.shutdown:
+        await _prepareForSystemShutdown(occurredAtUtc: occurredAtUtc);
+      case PowerEvent.shutdownCancelled:
+        await _handleShutdownCancelled();
+      case PowerEvent.lock:
+        await _handleSystemStop(
+          source: ActivitySource.systemLock,
+          occurredAtUtc: occurredAtUtc,
+          openPromptSynchronously: openPromptSynchronously,
+        );
+      case PowerEvent.sleep:
+        await _handleSystemStop(
+          source: ActivitySource.systemSleep,
+          occurredAtUtc: occurredAtUtc,
+          openPromptSynchronously: openPromptSynchronously,
+        );
     }
-    if (event == PowerEvent.shutdownCancelled) {
-      await _handleShutdownCancelled();
-      return;
-    }
+  }
 
+  Future<void> _handleSystemStop({
+    required ActivitySource source,
+    required bool openPromptSynchronously,
+    DateTime? occurredAtUtc,
+  }) async {
     final beforeSnapshot = await _trackerService.loadSnapshot();
     if (beforeSnapshot.activeTask == null) {
-      _snapshot = beforeSnapshot;
-      await _refreshTray(beforeSnapshot);
-      _nagScheduler?.update(beforeSnapshot);
-      notifyListeners();
+      await _applySnapshot(beforeSnapshot, notify: true);
       return;
     }
-
-    final source = switch (event) {
-      PowerEvent.lock => ActivitySource.systemLock,
-      PowerEvent.sleep => ActivitySource.systemSleep,
-      PowerEvent.shutdown => throw StateError('Shutdown handled separately.'),
-      PowerEvent.shutdownCancelled => throw StateError(
-        'Shutdown cancellation handled separately.',
-      ),
-    };
     if (openPromptSynchronously) {
       await _stopTaskAndOpenPrompt(source, occurredAtUtc: occurredAtUtc);
       return;
@@ -245,11 +249,8 @@ final class WydAppController extends ChangeNotifier {
       source: source,
       occurredAtUtc: occurredAtUtc,
     );
-    _snapshot = latestSnapshot;
     quickEntry.close();
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
-    notifyListeners();
+    await _applySnapshot(latestSnapshot, notify: true);
     unawaited(_runUserAction(() => _openQuickEntry(snapshot: latestSnapshot)));
   }
 
@@ -289,11 +290,7 @@ final class WydAppController extends ChangeNotifier {
   Future<void> exitRequested() async {
     _shutdownPreparationStoppedActiveTask = false;
     final latestSnapshot = await _trackerService.exitRequested();
-    _snapshot = latestSnapshot;
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
-    quickEntry.close();
-    _activeRole = null;
+    await _applyPreparedShutdown(latestSnapshot, notify: false);
     await _bestEffortExitCleanup();
     await _onExit();
   }
@@ -305,12 +302,16 @@ final class WydAppController extends ChangeNotifier {
     );
     _shutdownPreparationStoppedActiveTask =
         beforeSnapshot.activeTask != null && latestSnapshot.activeTask == null;
-    _snapshot = latestSnapshot;
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
+    await _applyPreparedShutdown(latestSnapshot, notify: true);
+  }
+
+  Future<void> _applyPreparedShutdown(
+    AppStateSnapshot snapshot, {
+    required bool notify,
+  }) async {
     quickEntry.close();
     _activeRole = null;
-    notifyListeners();
+    await _applySnapshot(snapshot, notify: notify);
   }
 
   Future<void> _handleShutdownCancelled() async {
@@ -320,12 +321,8 @@ final class WydAppController extends ChangeNotifier {
         latestSnapshot.activeTask == null;
     _shutdownPreparationStoppedActiveTask = false;
 
-    _snapshot = latestSnapshot;
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
-
     if (!shouldOpenPrompt) {
-      notifyListeners();
+      await _applySnapshot(latestSnapshot, notify: true);
       return;
     }
 
@@ -435,6 +432,18 @@ final class WydAppController extends ChangeNotifier {
     await _trayAdapter.updateIcon(TrayMenuPresenter.buildIconStatus(snapshot));
     await _trayAdapter.updateTooltip(TrayMenuPresenter.buildTooltip(snapshot));
     await _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
+  }
+
+  Future<void> _applySnapshot(
+    AppStateSnapshot snapshot, {
+    required bool notify,
+  }) async {
+    _snapshot = snapshot;
+    await _refreshTray(snapshot);
+    _nagScheduler?.update(snapshot);
+    if (notify) {
+      notifyListeners();
+    }
   }
 
   Future<void> _stopTaskAndOpenPrompt(

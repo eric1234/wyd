@@ -324,10 +324,80 @@ jobs:
               --jq ".assets[] | select(.name == \"$1\") | .id"
           }
 
+          old_tag_sha="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/snapshot" \
+            --jq '.[] | select(.ref == "refs/tags/snapshot") | .object.sha')"
+          old_body="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.body // ""')"
+          old_name="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.name // ""')"
+          old_draft="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.draft')"
+          old_prerelease="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.prerelease')"
+          touched=()
+          committed=false
+          rollback() {
+            if [[ "$committed" == 'true' ]]; then
+              trap - ERR INT TERM
+              return
+            fi
+            trap - ERR
+            trap '' INT TERM
+            set +e
+
+            for asset in "${touched[@]}"; do
+              stable_id="$(asset_id "$asset")"
+              previous_id="$(asset_id "$asset.previous")"
+              next_id="$(asset_id "$asset.next")"
+
+              if [[ -n "$previous_id" ]]; then
+                if [[ -n "$stable_id" && -z "$next_id" ]]; then
+                  gh api --method PATCH \
+                    "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                    -f name="$asset.next" >/dev/null || true
+                fi
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}" \
+                  -f name="$asset" >/dev/null || true
+              elif [[ -n "$stable_id" && -z "$next_id" ]]; then
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                  -f name="$asset.next" >/dev/null || true
+              fi
+            done
+
+            if [[ -n "$old_tag_sha" ]]; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/snapshot" \
+                -f sha="$old_tag_sha" \
+                -F force=true >/dev/null || true
+            else
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/snapshot" \
+                >/dev/null 2>&1 || true
+            fi
+
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -f name="$old_name" \
+              -f body="$old_body" \
+              -F draft="$old_draft" \
+              -F prerelease="$old_prerelease" \
+              -f make_latest='false' >/dev/null || true
+            exit 1
+          }
+          trap rollback ERR INT TERM
+
           for asset in "${assets[@]}"; do
             stable_id="$(asset_id "$asset")"
             next_id="$(asset_id "$asset.next")"
             test -n "$next_id"
+            touched+=("$asset")
 
             if [[ -n "$stable_id" ]]; then
               gh api --method PATCH \
@@ -335,28 +405,20 @@ jobs:
                 -f name="$asset.previous" >/dev/null
             fi
 
-            if ! gh api --method PATCH \
+            gh api --method PATCH \
               "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}" \
-              -f name="$asset" >/dev/null; then
-              if [[ -n "$stable_id" ]]; then
-                gh api --method PATCH \
-                  "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
-                  -f name="$asset" >/dev/null
-              fi
-              exit 1
-            fi
-
-            if [[ -n "$stable_id" ]]; then
-              gh api --method DELETE \
-                "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}"
-            fi
+              -f name="$asset" >/dev/null
           done
 
-          expected="$(printf '%s\n' "${assets[@]}" | sort)"
-          actual="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-            --jq '.assets[] | select(.state == "uploaded") | .name' | sort)"
-          test "$actual" = "$expected"
+          for asset in "${assets[@]}"; do
+            stable_id="$(asset_id "$asset")"
+            test -n "$stable_id"
+            expected_digest="sha256:$(sha256sum "dist/$asset" | cut -d' ' -f1)"
+            actual_digest="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+              --jq '.digest')"
+            test "$actual_digest" = "$expected_digest"
+          done
 
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" >/dev/null 2>&1; then
             gh api --method PATCH \
@@ -393,6 +455,17 @@ jobs:
             -F draft=false \
             -F prerelease=true \
             -f make_latest='false' >/dev/null
+
+          committed=true
+          trap - ERR INT TERM
+
+          for asset in "${assets[@]}"; do
+            previous_id="$(asset_id "$asset.previous")"
+            if [[ -n "$previous_id" ]]; then
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}" || true
+            fi
+          done
 
           test "$(gh release view snapshot \
             --repo "$GITHUB_REPOSITORY" \

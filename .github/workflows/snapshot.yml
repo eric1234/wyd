@@ -47,10 +47,17 @@ jobs:
             --json isDraft \
             --jq '.isDraft' \
             2>/dev/null || true)"
+          release_assets="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '[.assets[].name] | sort | join(",")' \
+            2>/dev/null || true)"
+          expected_assets='wyd-snapshot-linux-x64.zip,wyd-snapshot-macos-arm64.zip,wyd-snapshot-windows-x64.zip'
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           if [[ "$commit" == "$published" && \
                 "$commit" == "$release_commit" && \
-                "$release_draft" == 'false' ]]; then
+                "$release_draft" == 'false' && \
+                "$release_assets" == "$expected_assets" ]]; then
             echo "should-build=false" >> "$GITHUB_OUTPUT"
             echo "Snapshot already represents $commit."
           else
@@ -155,19 +162,25 @@ jobs:
           }
 
           $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
-          $crtDirectory = Get-ChildItem $redistRoot -Directory |
-            Sort-Object { [version]$_.Name } -Descending |
-            ForEach-Object {
-              $architectureDirectory = Join-Path $_.FullName 'x64'
-              if (Test-Path $architectureDirectory -PathType Container) {
-                Get-ChildItem $architectureDirectory -Directory `
-                  -Filter 'Microsoft.VC*.CRT' |
-                  Sort-Object Name -Descending |
-                  Select-Object -First 1
-              }
+          $runtimeFile = Get-ChildItem $redistRoot -Recurse -File `
+            -Filter 'vcruntime140.dll' |
+            Where-Object {
+              $_.Directory.Name -like 'Microsoft.VC*.CRT' -and
+              $_.Directory.Parent.Name -eq 'x64'
             } |
+            Sort-Object {
+              $version = $_.VersionInfo
+              [version]::new(
+                $version.FileMajorPart,
+                $version.FileMinorPart,
+                $version.FileBuildPart,
+                $version.FilePrivatePart
+              )
+            } -Descending |
             Select-Object -First 1
-          if (-not $crtDirectory) { throw 'Unable to locate the VC++ runtime' }
+          if (-not $runtimeFile) { throw 'Unable to locate the VC++ runtime' }
+          $crtDirectory = $runtimeFile.Directory
+          Write-Host "Using VC++ runtime $($runtimeFile.VersionInfo.FileVersion)"
 
           @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') |
             ForEach-Object {
@@ -239,7 +252,7 @@ jobs:
 
           - Built: $built_at
           - Flutter: $FLUTTER_VERSION
-          - Platforms: Linux x64, macOS arm64, Windows x64
+          - Platforms: Linux x64, macOS Apple Silicon, Windows x64
 
           These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
 
@@ -445,7 +458,7 @@ jobs:
 
           - Built: $(date -u +'%Y-%m-%d %H:%M UTC')
           - Flutter: $FLUTTER_VERSION
-          - Platforms: Linux x64, macOS arm64, Windows x64
+          - Platforms: Linux x64, macOS Apple Silicon, Windows x64
 
           These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
 
@@ -459,13 +472,21 @@ jobs:
           committed=true
           trap - ERR INT TERM
 
-          for asset in "${assets[@]}"; do
-            previous_id="$(asset_id "$asset.previous")"
-            if [[ -n "$previous_id" ]]; then
+          release_assets="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")"
+          while IFS=$'\t' read -r existing_id existing_name; do
+            keep=false
+            for asset in "${assets[@]}"; do
+              if [[ "$existing_name" == "$asset" ]]; then
+                keep=true
+                break
+              fi
+            done
+            if [[ "$keep" == 'false' ]]; then
               gh api --method DELETE \
-                "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}" || true
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}" || true
             fi
-          done
+          done < <(jq -r '.assets[] | [.id, .name] | @tsv' <<< "$release_assets")
 
           test "$(gh release view snapshot \
             --repo "$GITHUB_REPOSITORY" \

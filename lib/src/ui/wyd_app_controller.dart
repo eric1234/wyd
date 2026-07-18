@@ -71,14 +71,23 @@ final class WydAppController extends ChangeNotifier {
   String? _startupError;
   String? _runtimeErrorMessage;
   bool _initialized = false;
+  bool _disposed = false;
   bool _platformAdaptersDisposed = false;
   bool _shutdownPreparationStoppedActiveTask = false;
+  bool _systemStopPromptPending = false;
+  bool _terminationPreparationStarted = false;
+  bool _manualExitInProgress = false;
+  int _deferredSystemUiGeneration = 0;
+  Future<void> _systemEventChain = Future.value();
 
   AppStateSnapshot? get snapshot => _snapshot;
   WindowRole? get activeRole => _activeRole;
   String? get startupError => _startupError;
   String? get runtimeErrorMessage => _runtimeErrorMessage;
   bool get initialized => _initialized;
+  bool get _terminationInProgress {
+    return _terminationPreparationStarted || _manualExitInProgress;
+  }
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -96,7 +105,7 @@ final class WydAppController extends ChangeNotifier {
         tooltip: TrayMenuPresenter.buildTooltip(snapshot),
       );
       await _singleInstanceAdapter?.initialize(openQuickEntry);
-      await _nativeLifecycleAdapter?.initialize(exitRequested);
+      await _nativeLifecycleAdapter?.initialize(_prepareForNativeTermination);
       _menuSubscription = _trayAdapter.menuActions.listen(_handleTrayAction);
       _primaryClickSubscription = _trayAdapter.primaryClicks.listen(
         (_) => unawaited(_runUserAction(openQuickEntry)),
@@ -111,7 +120,13 @@ final class WydAppController extends ChangeNotifier {
           },
         );
       }
+      if (_terminationInProgress) {
+        return;
+      }
       await _openQuickEntry();
+      if (_terminationInProgress) {
+        return;
+      }
       await _reconcileStartupAtLogin(_snapshot!);
       _scheduleSecondaryWindowWarmUp();
     } catch (error) {
@@ -128,13 +143,30 @@ final class WydAppController extends ChangeNotifier {
     return _snapshot!;
   }
 
-  Future<void> _openQuickEntry({AppStateSnapshot? snapshot}) async {
+  Future<void> _openQuickEntry({
+    AppStateSnapshot? snapshot,
+    int? expectedSystemUiGeneration,
+    bool refreshIdleSuggestions = true,
+  }) async {
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      return;
+    }
     var latestSnapshot = snapshot ?? await _trackerService.loadSnapshot();
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      return;
+    }
     final shouldMarkPromptVisible =
         latestSnapshot.activeTask != null &&
         latestSnapshot.runtimeState.promptState.status == PromptStatus.none;
     _snapshot = latestSnapshot;
-    await quickEntry.open(latestSnapshot);
+    await quickEntry.open(
+      latestSnapshot,
+      refreshIdleSuggestions: refreshIdleSuggestions,
+    );
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      quickEntry.close();
+      return;
+    }
 
     _activeRole = WindowRole.quickEntry;
     notifyListeners();
@@ -146,11 +178,25 @@ final class WydAppController extends ChangeNotifier {
         configuration: WindowRoleConfiguration.quickEntry(),
       );
       windowOpened = true;
+      if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+        quickEntry.close();
+        _activeRole = null;
+        notifyListeners();
+        await _closeQuickEntryBestEffort();
+        return;
+      }
 
       if (shouldMarkPromptVisible) {
         try {
           latestSnapshot = await _trackerService.nagPromptShown();
           _snapshot = latestSnapshot;
+          if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+            quickEntry.close();
+            _activeRole = null;
+            notifyListeners();
+            await _closeQuickEntryBestEffort();
+            return;
+          }
         } catch (_) {
           quickEntry.close();
           _activeRole = null;
@@ -169,20 +215,43 @@ final class WydAppController extends ChangeNotifier {
     }
 
     await _refreshTray(latestSnapshot);
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      quickEntry.close();
+      _activeRole = null;
+      notifyListeners();
+      await _closeQuickEntryBestEffort();
+      return;
+    }
     _nagScheduler?.update(latestSnapshot);
     notifyListeners();
   }
 
+  bool _shouldAbortQuickEntryOpen(int? expectedSystemUiGeneration) {
+    return _terminationInProgress ||
+        expectedSystemUiGeneration != null &&
+            expectedSystemUiGeneration != _deferredSystemUiGeneration;
+  }
+
   Future<void> openReport() async {
-    await _windowCoordinator.openOrFocus(WindowRole.report);
+    await _openRoleUnlessTerminating(WindowRole.report);
   }
 
   Future<void> openSettings() async {
-    await _windowCoordinator.openOrFocus(WindowRole.settings);
+    await _openRoleUnlessTerminating(WindowRole.settings);
   }
 
   Future<void> openAbout() async {
-    await _windowCoordinator.openOrFocus(WindowRole.about);
+    await _openRoleUnlessTerminating(WindowRole.about);
+  }
+
+  Future<void> _openRoleUnlessTerminating(WindowRole role) async {
+    if (_terminationInProgress) {
+      return;
+    }
+    await _windowCoordinator.openOrFocus(role);
+    if (_terminationInProgress) {
+      await _windowCoordinator.close(role);
+    }
   }
 
   Future<void> stopTask() async {
@@ -193,15 +262,65 @@ final class WydAppController extends ChangeNotifier {
     await _handlePowerEvent(event: event, openPromptSynchronously: true);
   }
 
-  Future<void> _handleAcknowledgedPowerEvent(
+  Future<void> _handleAcknowledgedPowerEvent(PowerEventOccurrence occurrence) {
+    return _enqueueSystemEvent(
+      () => _persistAcknowledgedPowerEvent(occurrence),
+    );
+  }
+
+  Future<void> _persistAcknowledgedPowerEvent(
     PowerEventOccurrence occurrence,
   ) async {
-    await _runUserAction(
-      () => _handlePowerEvent(
-        event: occurrence.event,
-        occurredAtUtc: occurrence.occurredAtUtc,
-        openPromptSynchronously: false,
-      ),
+    switch (occurrence.event) {
+      case PowerEvent.lock:
+        await _persistAcknowledgedSystemStop(
+          source: ActivitySource.systemLock,
+          occurredAtUtc: occurrence.occurredAtUtc,
+        );
+      case PowerEvent.sleep:
+        await _persistAcknowledgedSystemStop(
+          source: ActivitySource.systemSleep,
+          occurredAtUtc: occurrence.occurredAtUtc,
+        );
+      case PowerEvent.shutdown:
+        final result = await _trackerService.prepareForSystemShutdown(
+          occurredAtUtc: occurrence.occurredAtUtc,
+        );
+        _applySystemBoundaryResult(result);
+        _systemStopPromptPending =
+            _systemStopPromptPending || result.didStopActiveTask;
+        _schedulePreparedShutdownUi();
+      case PowerEvent.shutdownCancelled:
+        final shouldOpenPrompt = _systemStopPromptPending;
+        _scheduleShutdownCancellationUi(shouldOpenPrompt: shouldOpenPrompt);
+    }
+  }
+
+  Future<void> _persistAcknowledgedSystemStop({
+    required ActivitySource source,
+    required DateTime occurredAtUtc,
+  }) async {
+    final result = await _trackerService.stopForSystemBoundary(
+      source: source,
+      occurredAtUtc: occurredAtUtc,
+    );
+    _applySystemBoundaryResult(result);
+    _systemStopPromptPending =
+        _systemStopPromptPending || result.didStopActiveTask;
+    _scheduleSystemStopUi();
+  }
+
+  void _applySystemBoundaryResult(SystemBoundaryResult result) {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return;
+    }
+    _snapshot = snapshot.copyWith(
+      activeTask: result.activeTask,
+      clearActiveTask: result.activeTask == null,
+      runtimeState: result.runtimeState,
+      busy: false,
+      clearErrorMessage: true,
     );
   }
 
@@ -288,11 +407,37 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> exitRequested() async {
+    if (_manualExitInProgress) {
+      return;
+    }
+    _manualExitInProgress = true;
+    _deferredSystemUiGeneration += 1;
+    _systemStopPromptPending = false;
     _shutdownPreparationStoppedActiveTask = false;
-    final latestSnapshot = await _trackerService.exitRequested();
-    await _applyPreparedShutdown(latestSnapshot, notify: false);
-    await _bestEffortExitCleanup();
-    await _onExit();
+    try {
+      final latestSnapshot = await _trackerService.exitRequested();
+      await _applyPreparedShutdown(latestSnapshot, notify: false);
+      await _bestEffortExitCleanup();
+      await _onExit();
+    } catch (_) {
+      _manualExitInProgress = false;
+      rethrow;
+    }
+  }
+
+  Future<void> _prepareForNativeTermination(
+    NativeTerminationOccurrence occurrence,
+  ) {
+    _terminationPreparationStarted = true;
+    _deferredSystemUiGeneration += 1;
+    _systemStopPromptPending = false;
+    _shutdownPreparationStoppedActiveTask = false;
+    _secondaryWindowWarmUpTimer?.cancel();
+    return _enqueueSystemEvent(() async {
+      await _trackerService.prepareForSystemShutdown(
+        occurredAtUtc: occurrence.occurredAtUtc,
+      );
+    });
   }
 
   Future<void> _prepareForSystemShutdown({DateTime? occurredAtUtc}) async {
@@ -329,6 +474,105 @@ final class WydAppController extends ChangeNotifier {
     await _openQuickEntry(snapshot: latestSnapshot);
   }
 
+  void _scheduleSystemStopUi() {
+    final generation = ++_deferredSystemUiGeneration;
+    Timer.run(() {
+      unawaited(_runUserAction(() => _applyDeferredSystemStopUi(generation)));
+    });
+  }
+
+  Future<void> _applyDeferredSystemStopUi(int generation) async {
+    if (_shouldSkipDeferredSystemUi(generation)) {
+      return;
+    }
+    final latestSnapshot = _snapshot;
+    if (latestSnapshot == null) {
+      return;
+    }
+
+    quickEntry.close();
+    await _applySnapshot(latestSnapshot, notify: true);
+    if (_shouldSkipDeferredSystemUi(generation) ||
+        !_systemStopPromptPending ||
+        latestSnapshot.activeTask != null) {
+      return;
+    }
+
+    await _openQuickEntry(
+      snapshot: latestSnapshot,
+      expectedSystemUiGeneration: generation,
+      refreshIdleSuggestions: false,
+    );
+    if (!_shouldSkipDeferredSystemUi(generation) && quickEntry.state.isOpen) {
+      _systemStopPromptPending = false;
+    }
+  }
+
+  void _schedulePreparedShutdownUi() {
+    final generation = ++_deferredSystemUiGeneration;
+    Timer.run(() {
+      unawaited(
+        _runUserAction(() => _applyDeferredPreparedShutdownUi(generation)),
+      );
+    });
+  }
+
+  Future<void> _applyDeferredPreparedShutdownUi(int generation) async {
+    if (_shouldSkipDeferredSystemUi(generation)) {
+      return;
+    }
+    final latestSnapshot = _snapshot;
+    if (latestSnapshot == null) {
+      return;
+    }
+    await _applyPreparedShutdown(latestSnapshot, notify: true);
+  }
+
+  void _scheduleShutdownCancellationUi({required bool shouldOpenPrompt}) {
+    final generation = ++_deferredSystemUiGeneration;
+    Timer.run(() {
+      unawaited(
+        _runUserAction(
+          () => _applyDeferredShutdownCancellationUi(
+            generation,
+            shouldOpenPrompt: shouldOpenPrompt,
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<void> _applyDeferredShutdownCancellationUi(
+    int generation, {
+    required bool shouldOpenPrompt,
+  }) async {
+    if (_shouldSkipDeferredSystemUi(generation)) {
+      return;
+    }
+    final latestSnapshot = _snapshot;
+    if (latestSnapshot == null) {
+      return;
+    }
+    if (!shouldOpenPrompt || latestSnapshot.activeTask != null) {
+      await _applySnapshot(latestSnapshot, notify: true);
+      return;
+    }
+    await _openQuickEntry(
+      snapshot: latestSnapshot,
+      expectedSystemUiGeneration: generation,
+      refreshIdleSuggestions: false,
+    );
+    if (!_shouldSkipDeferredSystemUi(generation) && quickEntry.state.isOpen) {
+      _systemStopPromptPending = false;
+    }
+  }
+
+  bool _shouldSkipDeferredSystemUi(int generation) {
+    return _disposed ||
+        _terminationInProgress ||
+        generation != _deferredSystemUiGeneration;
+  }
+
   Future<void> exitAfterStartupError() async {
     try {
       await _trackerService.exitRequested();
@@ -352,6 +596,9 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> handleRuntimeError(Object error, [StackTrace? _]) async {
+    if (_disposed || _terminationInProgress) {
+      return;
+    }
     _runtimeErrorMessage = error.toString();
     quickEntry.close();
     _activeRole = WindowRole.quickEntry;
@@ -361,6 +608,10 @@ final class WydAppController extends ChangeNotifier {
         WindowRole.quickEntry,
         configuration: WindowRoleConfiguration.runtimeError(),
       );
+      if (_terminationInProgress) {
+        _activeRole = null;
+        await _closeQuickEntryBestEffort();
+      }
     } catch (_) {
       // If the error window cannot be shown, keep the error in controller state
       // so it is still visible if another window is later opened successfully.
@@ -369,6 +620,8 @@ final class WydAppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _deferredSystemUiGeneration += 1;
     _menuSubscription?.cancel();
     _primaryClickSubscription?.cancel();
     _windowCloseSubscription?.cancel();
@@ -384,6 +637,7 @@ final class WydAppController extends ChangeNotifier {
 
   Future<void> _quickEntrySubmitted(AppStateSnapshot snapshot) async {
     _shutdownPreparationStoppedActiveTask = false;
+    _systemStopPromptPending = false;
     _snapshot = snapshot;
     _activeRole = null;
     await _windowCoordinator.close(WindowRole.quickEntry);
@@ -460,6 +714,9 @@ final class WydAppController extends ChangeNotifier {
   }
 
   void _scheduleSecondaryWindowWarmUp() {
+    if (_terminationInProgress) {
+      return;
+    }
     final delay = _secondaryWindowWarmUpDelay;
     if (delay == null) {
       return;
@@ -474,8 +731,15 @@ final class WydAppController extends ChangeNotifier {
 
   Future<void> _warmUpSecondaryWindows() async {
     for (final role in [WindowRole.report, WindowRole.settings]) {
+      if (_terminationInProgress) {
+        return;
+      }
       try {
         await _windowCoordinator.preload(role);
+        if (_terminationInProgress) {
+          await _windowCoordinator.close(role);
+          return;
+        }
       } catch (_) {
         // Window warm-up is only an optimization; normal open remains available.
       }
@@ -515,8 +779,28 @@ final class WydAppController extends ChangeNotifier {
     try {
       await action();
     } catch (error, stackTrace) {
-      await handleRuntimeError(error, stackTrace);
+      if (!_disposed) {
+        await handleRuntimeError(error, stackTrace);
+      }
     }
+  }
+
+  Future<void> _enqueueSystemEvent(Future<void> Function() action) {
+    final completion = Completer<void>();
+    _systemEventChain = _systemEventChain.then((_) async {
+      try {
+        await action();
+        completion.complete();
+      } catch (error, stackTrace) {
+        completion.completeError(error, stackTrace);
+        if (!_disposed && !_terminationPreparationStarted) {
+          Timer.run(() {
+            unawaited(handleRuntimeError(error, stackTrace));
+          });
+        }
+      }
+    });
+    return completion.future;
   }
 
   Future<void> _closeQuickEntryBestEffort() async {

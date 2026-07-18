@@ -4,9 +4,11 @@
 #include <flutter/standard_method_codec.h>
 #include <wtsapi32.h>
 
+#include <atomic>
 #include <cstdio>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "desktop_multi_window/desktop_multi_window_plugin.h"
 #include "flutter/generated_plugin_registrant.h"
@@ -16,13 +18,16 @@
 
 namespace {
 
-constexpr DWORD kLifecycleAcknowledgementTimeoutMs = 5000;
+constexpr DWORD kLifecycleAcknowledgementTimeoutMs = 4000;
 constexpr DWORD kPowerEventAcknowledgementTimeoutMs = 1800;
-constexpr DWORD kMessagePumpIntervalMs = 25;
+constexpr UINT kDrainNativeEventsMessage = WM_APP + 0x37;
+constexpr UINT kRetrySessionNotificationMessage = WM_APP + 0x38;
+constexpr UINT_PTR kSessionNotificationRetryTimerId = 0x57594401;
+constexpr UINT kSessionNotificationRetryIntervalMs = 1000;
+constexpr wchar_t kTerminalServicesReadyEventName[] =
+    L"Global\\TermSrvReadyEvent";
 
-struct MethodCallWaitState {
-  bool completed = false;
-};
+std::atomic<UINT_PTR> g_next_callback_generation{1};
 
 std::string CurrentUtcIso8601() {
   SYSTEMTIME system_time;
@@ -40,7 +45,26 @@ std::string CurrentUtcIso8601() {
   return std::string(buffer);
 }
 
+void LogWindowsError(const char* operation, DWORD error) noexcept {
+  char buffer[192];
+  const int length = std::snprintf(
+      buffer, sizeof(buffer), "wyd: %s failed with Windows error %lu.\n",
+      operation, static_cast<unsigned long>(error));
+  if (length > 0) {
+    OutputDebugStringA(buffer);
+  }
+}
+
 }  // namespace
+
+FlutterWindow::NativeEvent::NativeEvent(std::uint64_t event_id,
+                                        NativeEventKind event_kind,
+                                        std::string occurred_at,
+                                        ULONGLONG event_deadline)
+    : id(event_id),
+      kind(event_kind),
+      occurred_at_utc(std::move(occurred_at)),
+      deadline(event_deadline) {}
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
                              UINT second_instance_message)
@@ -63,11 +87,19 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
+
+  tearing_down_ = false;
+  callback_generation_ = g_next_callback_generation.fetch_add(1);
+  callback_context_ = std::make_shared<CallbackContext>();
+  callback_context_->window = GetHandle();
+  callback_context_->generation = callback_generation_;
+  callback_context_->valid = true;
+
   RegisterPlugins(flutter_controller_->engine());
   ConfigureSingleInstanceChannel();
   ConfigureLifecycleChannel();
   ConfigureAcknowledgedPowerEventChannel();
-  RegisterPowerNotifications();
+  RegisterSessionNotifications();
   DesktopMultiWindowSetWindowCreatedCallback([](void* controller) {
     auto* flutter_view_controller =
         reinterpret_cast<flutter::FlutterViewController*>(controller);
@@ -94,7 +126,17 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
-  UnregisterPowerNotifications();
+  tearing_down_ = true;
+  if (callback_context_) {
+    AcquireSRWLockExclusive(&callback_context_->lock);
+    callback_context_->valid = false;
+    callback_context_->window = nullptr;
+    ReleaseSRWLockExclusive(&callback_context_->lock);
+  }
+  callback_generation_ = 0;
+
+  UnregisterSessionNotifications();
+  native_events_.clear();
   power_events_ready_ = false;
   if (acknowledged_power_event_channel_) {
     acknowledged_power_event_channel_->SetMethodCallHandler(nullptr);
@@ -113,6 +155,7 @@ void FlutterWindow::OnDestroy() {
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
+  callback_context_.reset();
 
   Win32Window::OnDestroy();
 }
@@ -121,52 +164,107 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                                WPARAM const wparam,
                                LPARAM const lparam) noexcept {
-  if (second_instance_message_ != 0 && message == second_instance_message_) {
-    NotifySecondInstanceActivated();
+  if (message == WM_QUERYENDSESSION) {
+    return TRUE;
+  }
+  if (message == WM_ENDSESSION && wparam == FALSE) {
     return 0;
   }
 
-  switch (message) {
-    case WM_QUERYENDSESSION:
-      return TRUE;
-    case WM_ENDSESSION:
-      if (wparam == TRUE) {
-        RequestTerminationAndWait();
-      }
+  try {
+    if (second_instance_message_ != 0 && message == second_instance_message_) {
+      NotifySecondInstanceActivated();
       return 0;
-    case WM_POWERBROADCAST:
-      if (wparam == PBT_APMSUSPEND) {
-        SendAcknowledgedPowerEventAndWait("sleep");
-        return TRUE;
-      }
-      break;
-    case WM_WTSSESSION_CHANGE:
-      if (wparam == WTS_SESSION_LOCK) {
-        SendAcknowledgedPowerEventAndWait("lock");
-        return 0;
-      }
-      break;
-  }
-
-  // Give Flutter, including plugins, an opportunity to handle window messages.
-  if (flutter_controller_) {
-    std::optional<LRESULT> result =
-        flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
-                                                      lparam);
-    if (result) {
-      return *result;
     }
-  }
 
-  switch (message) {
-    case WM_FONTCHANGE:
-      if (flutter_controller_) {
-        flutter_controller_->engine()->ReloadSystemFonts();
+    switch (message) {
+      case kDrainNativeEventsMessage:
+        if (wparam == callback_generation_ && !tearing_down_) {
+          DrainNativeEvents();
+        }
+        return 0;
+      case kRetrySessionNotificationMessage:
+        if (wparam == callback_generation_ && !tearing_down_) {
+          terminal_services_ready_event_observed_ = true;
+          CancelSessionNotificationRegistrationRetry();
+          TryRegisterSessionNotifications();
+        }
+        return 0;
+      case WM_TIMER:
+        if (session_notification_retry_timer_id_ != 0 &&
+            wparam == session_notification_retry_timer_id_) {
+          TryRegisterSessionNotifications();
+          return 0;
+        }
+        break;
+      case WM_ENDSESSION:
+        EnqueueNativeEventAndWait(NativeEventKind::kTermination,
+                                  kLifecycleAcknowledgementTimeoutMs);
+        return 0;
+      case WM_POWERBROADCAST:
+        if (wparam == PBT_APMSUSPEND) {
+          EnqueueNativeEventAndWait(NativeEventKind::kSleep,
+                                    kPowerEventAcknowledgementTimeoutMs);
+          return TRUE;
+        }
+        break;
+      case WM_WTSSESSION_CHANGE:
+        if (wparam == WTS_SESSION_LOCK) {
+          EnqueueNativeEventAndWait(NativeEventKind::kLock,
+                                    kPowerEventAcknowledgementTimeoutMs);
+          return 0;
+        }
+        break;
+    }
+
+    // Give Flutter, including plugins, an opportunity to handle window
+    // messages.
+    if (flutter_controller_) {
+      std::optional<LRESULT> result =
+          flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
+                                                        lparam);
+      if (result) {
+        return *result;
       }
-      break;
-  }
+    }
 
-  return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+    switch (message) {
+      case WM_FONTCHANGE:
+        if (flutter_controller_) {
+          flutter_controller_->engine()->ReloadSystemFonts();
+        }
+        break;
+    }
+
+    return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+  } catch (...) {
+    OutputDebugStringA("wyd: window message handling failed open.\n");
+    switch (message) {
+      case WM_ENDSESSION:
+        return 0;
+      case WM_POWERBROADCAST:
+        if (wparam == PBT_APMSUSPEND) {
+          return TRUE;
+        }
+        break;
+      case WM_WTSSESSION_CHANGE:
+        if (wparam == WTS_SESSION_LOCK) {
+          return 0;
+        }
+        break;
+      case kDrainNativeEventsMessage:
+      case kRetrySessionNotificationMessage:
+        return 0;
+      case WM_TIMER:
+        if (session_notification_retry_timer_id_ != 0 &&
+            wparam == session_notification_retry_timer_id_) {
+          return 0;
+        }
+        break;
+    }
+
+    return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+  }
 }
 
 void FlutterWindow::ConfigureSingleInstanceChannel() {
@@ -204,6 +302,7 @@ void FlutterWindow::ConfigureLifecycleChannel() {
         if (call.method_name() == "lifecycleReady") {
           lifecycle_ready_ = true;
           result->Success();
+          PostNativeEventDrain();
           return;
         }
 
@@ -224,6 +323,7 @@ void FlutterWindow::ConfigureAcknowledgedPowerEventChannel() {
         if (call.method_name() == "powerEventsReady") {
           power_events_ready_ = true;
           result->Success();
+          PostNativeEventDrain();
           return;
         }
 
@@ -231,25 +331,159 @@ void FlutterWindow::ConfigureAcknowledgedPowerEventChannel() {
       });
 }
 
-void FlutterWindow::RegisterPowerNotifications() {
-  power_notification_window_ = GetHandle();
-  if (power_notification_window_ == nullptr) {
-    return;
+void FlutterWindow::RegisterSessionNotifications() {
+  session_notification_window_ = GetHandle();
+  if (session_notification_window_ != nullptr) {
+    TryRegisterSessionNotifications();
   }
-
-  power_notifications_registered_ =
-      WTSRegisterSessionNotification(power_notification_window_,
-                                     NOTIFY_FOR_THIS_SESSION) != FALSE;
 }
 
-void FlutterWindow::UnregisterPowerNotifications() {
-  if (!power_notifications_registered_ || power_notification_window_ == nullptr) {
+void FlutterWindow::TryRegisterSessionNotifications() {
+  if (tearing_down_ || session_notifications_registered_ ||
+      session_notification_window_ == nullptr) {
     return;
   }
 
-  WTSUnRegisterSessionNotification(power_notification_window_);
-  power_notifications_registered_ = false;
-  power_notification_window_ = nullptr;
+  const BOOL registered = WTSRegisterSessionNotification(
+      session_notification_window_, NOTIFY_FOR_THIS_SESSION);
+  const DWORD error = registered == FALSE ? GetLastError() : ERROR_SUCCESS;
+  if (registered != FALSE) {
+    session_notifications_registered_ = true;
+    CancelSessionNotificationRegistrationRetry();
+    return;
+  }
+
+  if (error == RPC_S_INVALID_BINDING) {
+    ScheduleSessionNotificationRegistrationRetry();
+    return;
+  }
+
+  CancelSessionNotificationRegistrationRetry();
+  LogWindowsError("WTSRegisterSessionNotification", error);
+}
+
+void FlutterWindow::ScheduleSessionNotificationRegistrationRetry() {
+  if (tearing_down_ || terminal_services_ready_wait_ != nullptr ||
+      session_notification_retry_timer_id_ != 0 ||
+      session_notification_window_ == nullptr) {
+    return;
+  }
+
+  if (!terminal_services_ready_event_observed_) {
+    terminal_services_ready_event_ = OpenEventW(
+        SYNCHRONIZE, FALSE, kTerminalServicesReadyEventName);
+    const DWORD open_error = terminal_services_ready_event_ == nullptr
+                                 ? GetLastError()
+                                 : ERROR_SUCCESS;
+    if (terminal_services_ready_event_ != nullptr) {
+      HANDLE wait_handle = nullptr;
+      const BOOL wait_registered = RegisterWaitForSingleObject(
+          &wait_handle, terminal_services_ready_event_,
+          &FlutterWindow::OnTerminalServicesReady, callback_context_.get(),
+          INFINITE, WT_EXECUTEONLYONCE);
+      const DWORD wait_error =
+          wait_registered == FALSE ? GetLastError() : ERROR_SUCCESS;
+      if (wait_registered != FALSE) {
+        terminal_services_ready_wait_ = wait_handle;
+        return;
+      }
+
+      LogWindowsError("RegisterWaitForSingleObject", wait_error);
+      CloseHandle(terminal_services_ready_event_);
+      terminal_services_ready_event_ = nullptr;
+    } else {
+      LogWindowsError("OpenEventW(Global\\TermSrvReadyEvent)", open_error);
+    }
+  }
+
+  session_notification_retry_timer_id_ =
+      SetTimer(session_notification_window_,
+               kSessionNotificationRetryTimerId,
+               kSessionNotificationRetryIntervalMs, nullptr);
+  if (session_notification_retry_timer_id_ == 0) {
+    const DWORD error = GetLastError();
+    LogWindowsError("SetTimer(session notification retry)", error);
+  }
+}
+
+void FlutterWindow::CancelSessionNotificationRegistrationRetry() {
+  if (session_notification_retry_timer_id_ != 0 &&
+      session_notification_window_ != nullptr) {
+    KillTimer(session_notification_window_,
+              session_notification_retry_timer_id_);
+    session_notification_retry_timer_id_ = 0;
+  }
+
+  if (terminal_services_ready_wait_ != nullptr) {
+    const BOOL unregistered = UnregisterWaitEx(
+        terminal_services_ready_wait_, INVALID_HANDLE_VALUE);
+    const DWORD error = unregistered == FALSE ? GetLastError() : ERROR_SUCCESS;
+    if (unregistered == FALSE && error != ERROR_INVALID_HANDLE) {
+      LogWindowsError("UnregisterWaitEx", error);
+    }
+    terminal_services_ready_wait_ = nullptr;
+  }
+
+  if (terminal_services_ready_event_ != nullptr) {
+    CloseHandle(terminal_services_ready_event_);
+    terminal_services_ready_event_ = nullptr;
+  }
+}
+
+void FlutterWindow::UnregisterSessionNotifications() {
+  CancelSessionNotificationRegistrationRetry();
+
+  if (session_notifications_registered_ &&
+      session_notification_window_ != nullptr) {
+    const BOOL unregistered =
+        WTSUnRegisterSessionNotification(session_notification_window_);
+    const DWORD error = unregistered == FALSE ? GetLastError() : ERROR_SUCCESS;
+    if (unregistered == FALSE) {
+      LogWindowsError("WTSUnRegisterSessionNotification", error);
+    }
+    session_notifications_registered_ = false;
+  }
+
+  session_notification_window_ = nullptr;
+  terminal_services_ready_event_observed_ = false;
+}
+
+void CALLBACK FlutterWindow::OnTerminalServicesReady(void* context,
+                                                      BOOLEAN) {
+  auto* callback_context = static_cast<CallbackContext*>(context);
+  if (callback_context == nullptr) {
+    return;
+  }
+
+  AcquireSRWLockShared(&callback_context->lock);
+  const bool valid =
+      callback_context->valid && callback_context->window != nullptr;
+  const bool posted =
+      valid && PostMessage(callback_context->window,
+                           kRetrySessionNotificationMessage,
+                           callback_context->generation, 0) != FALSE;
+  ReleaseSRWLockShared(&callback_context->lock);
+  if (valid && !posted) {
+    OutputDebugStringA(
+        "wyd: terminal-services readiness retry could not be posted.\n");
+  }
+}
+
+bool FlutterWindow::PostCallbackMessage(
+    const std::shared_ptr<CallbackContext>& context,
+    UINT message,
+    UINT_PTR generation) noexcept {
+  if (!context) {
+    return false;
+  }
+
+  AcquireSRWLockShared(&context->lock);
+  const bool posted = context->valid && context->generation == generation &&
+                      context->window != nullptr &&
+                      PostMessage(context->window, message, generation, 0) !=
+                          FALSE;
+  ReleaseSRWLockShared(&context->lock);
+  return posted;
 }
 
 void FlutterWindow::NotifySecondInstanceActivated() {
@@ -264,102 +498,213 @@ void FlutterWindow::NotifySecondInstanceActivated() {
   pending_second_instance_activation_ = false;
 }
 
-void FlutterWindow::RequestTerminationAndWait() {
-  if (!lifecycle_ready_ || !lifecycle_channel_ ||
-      termination_request_in_progress_) {
+void FlutterWindow::EnqueueNativeEventAndWait(NativeEventKind kind,
+                                               DWORD timeout_ms) {
+  const ULONGLONG received_at = GetTickCount64();
+  auto event = std::make_shared<NativeEvent>(
+      next_native_event_id_++, kind, CurrentUtcIso8601(),
+      received_at + timeout_ms);
+  native_events_.push_back(event);
+  PostNativeEventDrain();
+  WaitForNativeEvent(event);
+}
+
+void FlutterWindow::DrainNativeEvents() {
+  if (tearing_down_ || !lifecycle_ready_ || !power_events_ready_ ||
+      !lifecycle_channel_ || !acknowledged_power_event_channel_) {
     return;
   }
 
-  termination_request_in_progress_ = true;
-  InvokeDartMethodAndWait(lifecycle_channel_.get(), "terminationRequested",
-                          std::make_unique<flutter::EncodableValue>(),
-                          kLifecycleAcknowledgementTimeoutMs);
-  termination_request_in_progress_ = false;
-}
+  while (!native_events_.empty()) {
+    const auto event = native_events_.front();
+    const NativeEventState state = event->state.load();
+    if (state == NativeEventState::kCompleted ||
+        state == NativeEventState::kWaitExpired) {
+      native_events_.pop_front();
+      continue;
+    }
+    if (state == NativeEventState::kAwaitingReply) {
+      return;
+    }
 
-void FlutterWindow::SendAcknowledgedPowerEventAndWait(
-    const std::string& event) {
-  if (!power_events_ready_ || !acknowledged_power_event_channel_ ||
-      power_event_wait_in_progress_) {
+    NativeEventState expected = NativeEventState::kPending;
+    if (!event->state.compare_exchange_strong(
+            expected, NativeEventState::kAwaitingReply)) {
+      continue;
+    }
+
+    try {
+      flutter::EncodableMap arguments;
+      arguments[flutter::EncodableValue("occurredAtUtc")] =
+          flutter::EncodableValue(event->occurred_at_utc);
+
+      flutter::MethodChannel<flutter::EncodableValue>* channel = nullptr;
+      const char* method = nullptr;
+      if (event->kind == NativeEventKind::kTermination) {
+        channel = lifecycle_channel_.get();
+        method = "prepareForTermination";
+      } else {
+        channel = acknowledged_power_event_channel_.get();
+        method = "powerEvent";
+        arguments[flutter::EncodableValue("event")] = flutter::EncodableValue(
+            event->kind == NativeEventKind::kLock ? "lock" : "sleep");
+      }
+
+      const auto callback_context = callback_context_;
+      const UINT_PTR generation = callback_generation_;
+      const auto complete = [event, callback_context, generation]() noexcept {
+        NativeEventState awaiting = NativeEventState::kAwaitingReply;
+        if (!event->state.compare_exchange_strong(
+                awaiting, NativeEventState::kCompleted)) {
+          return;
+        }
+        PostCallbackMessage(callback_context, kDrainNativeEventsMessage,
+                            generation);
+      };
+
+      channel->InvokeMethod(
+          method, std::make_unique<flutter::EncodableValue>(arguments),
+          std::make_unique<
+              flutter::MethodResultFunctions<flutter::EncodableValue>>(
+              [complete](const flutter::EncodableValue*) { complete(); },
+              [complete](const std::string&, const std::string&,
+                         const flutter::EncodableValue*) { complete(); },
+              [complete]() { complete(); }));
+    } catch (...) {
+      NativeEventState awaiting = NativeEventState::kAwaitingReply;
+      event->state.compare_exchange_strong(
+          awaiting, NativeEventState::kWaitExpired);
+      OutputDebugStringA("wyd: native event invocation failed open.\n");
+      PostNativeEventDrain();
+      return;
+    }
+
+    if (!event->waiter_active.load() || GetTickCount64() >= event->deadline) {
+      NativeEventState awaiting = NativeEventState::kAwaitingReply;
+      if (event->state.compare_exchange_strong(
+              awaiting, NativeEventState::kWaitExpired)) {
+        PostNativeEventDrain();
+      }
+    }
     return;
   }
-
-  flutter::EncodableMap arguments;
-  arguments[flutter::EncodableValue("event")] = flutter::EncodableValue(event);
-  arguments[flutter::EncodableValue("occurredAtUtc")] =
-      flutter::EncodableValue(CurrentUtcIso8601());
-
-  power_event_wait_in_progress_ = true;
-  InvokeDartMethodAndWait(
-      acknowledged_power_event_channel_.get(), "powerEvent",
-      std::make_unique<flutter::EncodableValue>(arguments),
-      kPowerEventAcknowledgementTimeoutMs);
-  power_event_wait_in_progress_ = false;
 }
 
-bool FlutterWindow::InvokeDartMethodAndWait(
-    flutter::MethodChannel<flutter::EncodableValue>* channel,
-    const std::string& method,
-    std::unique_ptr<flutter::EncodableValue> arguments,
-    DWORD timeout_ms) {
-  if (channel == nullptr) {
+void FlutterWindow::ExpireNativeEventsBefore(
+    const std::shared_ptr<NativeEvent>& event) {
+  for (const auto& candidate : native_events_) {
+    if (candidate == event) {
+      break;
+    }
+
+    candidate->waiter_active.store(false);
+    NativeEventState state = candidate->state.load();
+    while (state == NativeEventState::kPending ||
+           state == NativeEventState::kAwaitingReply) {
+      if (candidate->state.compare_exchange_weak(
+              state, NativeEventState::kWaitExpired)) {
+        break;
+      }
+    }
+  }
+}
+
+bool FlutterWindow::ShouldStopNativeEventWait(
+    const std::shared_ptr<NativeEvent>& event,
+    ULONGLONG now) {
+  if (now < earliest_wait_deadline_) {
     return false;
   }
+  if (event->kind != NativeEventKind::kTermination ||
+      now >= event->deadline || earliest_wait_deadline_ >= event->deadline) {
+    return true;
+  }
 
-  auto wait_state = std::make_shared<MethodCallWaitState>();
-  channel->InvokeMethod(
-      method, std::move(arguments),
-      std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
-          [wait_state](const flutter::EncodableValue*) {
-            wait_state->completed = true;
-          },
-          [wait_state](const std::string&, const std::string&,
-                       const flutter::EncodableValue*) {
-            wait_state->completed = true;
-          },
-          [wait_state]() { wait_state->completed = true; }));
+  ExpireNativeEventsBefore(event);
+  DrainNativeEvents();
+  earliest_wait_deadline_ = event->deadline;
+  return false;
+}
 
-  const ULONGLONG deadline = GetTickCount64() + timeout_ms;
-  bool repost_quit = false;
-  WPARAM quit_wparam = 0;
+bool FlutterWindow::WaitForNativeEvent(
+    const std::shared_ptr<NativeEvent>& event) noexcept {
+  const ULONGLONG previous_deadline = earliest_wait_deadline_;
+  if (earliest_wait_deadline_ == 0 ||
+      event->deadline < earliest_wait_deadline_) {
+    earliest_wait_deadline_ = event->deadline;
+  }
+  const bool outermost_wait = wait_pump_depth_ == 0;
+  ++wait_pump_depth_;
 
-  while (!wait_state->completed) {
-    MSG message;
-    while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
-      if (message.message == WM_QUIT) {
-        repost_quit = true;
-        quit_wparam = message.wParam;
-        wait_state->completed = true;
-        break;
-      }
-
-      TranslateMessage(&message);
-      DispatchMessage(&message);
-      if (wait_state->completed) {
-        break;
-      }
-    }
-
-    if (wait_state->completed) {
+  bool stop_waiting = quit_reposted_;
+  while (!stop_waiting && !tearing_down_) {
+    const NativeEventState state = event->state.load();
+    if (state == NativeEventState::kCompleted ||
+        state == NativeEventState::kWaitExpired || quit_consumed_) {
       break;
     }
 
-    const ULONGLONG now = GetTickCount64();
-    if (now >= deadline) {
+    ULONGLONG now = GetTickCount64();
+    if (ShouldStopNativeEventWait(event, now)) {
       break;
     }
 
-    const ULONGLONG remaining = deadline - now;
-    const DWORD wait_ms = remaining < kMessagePumpIntervalMs
-                              ? static_cast<DWORD>(remaining)
-                              : kMessagePumpIntervalMs;
-    MsgWaitForMultipleObjectsEx(0, nullptr, wait_ms, QS_ALLINPUT,
-                                MWMO_INPUTAVAILABLE);
+    MSG pending_message{};
+    if (PeekMessage(&pending_message, nullptr, 0, 0, PM_NOREMOVE)) {
+      if (ShouldStopNativeEventWait(event, GetTickCount64())) {
+        break;
+      }
+      if (!PeekMessage(&pending_message, nullptr, 0, 0, PM_REMOVE)) {
+        continue;
+      }
+      if (pending_message.message == WM_QUIT) {
+        if (!quit_consumed_) {
+          quit_consumed_ = true;
+          quit_wparam_ = pending_message.wParam;
+        }
+        break;
+      }
+
+      TranslateMessage(&pending_message);
+      DispatchMessage(&pending_message);
+      now = GetTickCount64();
+      if (ShouldStopNativeEventWait(event, now)) {
+        break;
+      }
+      continue;
+    }
+
+    now = GetTickCount64();
+    if (ShouldStopNativeEventWait(event, now)) {
+      break;
+    }
+    const ULONGLONG remaining = earliest_wait_deadline_ - now;
+    const DWORD wait_ms = static_cast<DWORD>(remaining);
+    const DWORD wait_result = MsgWaitForMultipleObjectsEx(
+        0, nullptr, wait_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    if (wait_result == WAIT_FAILED) {
+      stop_waiting = true;
+    }
   }
 
-  if (repost_quit) {
-    PostQuitMessage(static_cast<int>(quit_wparam));
+  event->waiter_active.store(false);
+  NativeEventState awaiting = NativeEventState::kAwaitingReply;
+  if (event->state.compare_exchange_strong(
+          awaiting, NativeEventState::kWaitExpired)) {
+    PostNativeEventDrain();
   }
 
-  return wait_state->completed;
+  --wait_pump_depth_;
+  earliest_wait_deadline_ = previous_deadline;
+  if (outermost_wait && quit_consumed_ && !quit_reposted_) {
+    quit_reposted_ = true;
+    PostQuitMessage(static_cast<int>(quit_wparam_));
+  }
+
+  return event->state.load() == NativeEventState::kCompleted;
+}
+
+void FlutterWindow::PostNativeEventDrain() const noexcept {
+  PostCallbackMessage(callback_context_, kDrainNativeEventsMessage,
+                      callback_generation_);
 }

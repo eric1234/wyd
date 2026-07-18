@@ -145,7 +145,16 @@ abstract interface class SingleInstanceAdapter {
 }
 
 abstract interface class NativeLifecycleAdapter {
-  Future<void> initialize(Future<void> Function() onTerminationRequested);
+  Future<void> initialize(
+    Future<void> Function(NativeTerminationOccurrence occurrence)
+    onTerminationRequested,
+  );
+}
+
+final class NativeTerminationOccurrence {
+  const NativeTerminationOccurrence({required this.occurredAtUtc});
+
+  final DateTime occurredAtUtc;
 }
 
 abstract interface class DisposablePlatformAdapter {
@@ -158,7 +167,8 @@ final class UnsupportedNativeLifecycleAdapter
 
   @override
   Future<void> initialize(
-    Future<void> Function() onTerminationRequested,
+    Future<void> Function(NativeTerminationOccurrence occurrence)
+    onTerminationRequested,
   ) async {}
 }
 

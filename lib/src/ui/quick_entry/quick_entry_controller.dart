@@ -96,7 +96,10 @@ final class QuickEntryController extends ChangeNotifier {
 
   QuickEntryState get state => _state;
 
-  Future<void> open(AppStateSnapshot snapshot) async {
+  Future<void> open(
+    AppStateSnapshot snapshot, {
+    bool refreshIdleSuggestions = true,
+  }) async {
     if (_state.isOpen) {
       _setState(_state.copyWith(selectAllOnOpen: false));
       return;
@@ -119,7 +122,7 @@ final class QuickEntryController extends ChangeNotifier {
         selectAllOnOpen: initialText.isNotEmpty,
       ),
     );
-    if (activeTask == null) {
+    if (activeTask == null && refreshIdleSuggestions) {
       await refreshSuggestions();
     }
   }

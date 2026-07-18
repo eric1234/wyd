@@ -25,8 +25,10 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   private var singleInstanceReady = false
   private var lifecycleReady = false
   private var acknowledgedPowerEventsReady = false
+  private var terminationRequestGeneration = 0
   private var terminationRequestInProgress = false
   private var terminationRequestDeliveredToDart = false
+  private var terminationRequestOccurredAtUtc: String?
   private var terminationReplyApplication: NSApplication?
   private var terminationTimeout: DispatchWorkItem?
   private var sleepPowerChangeInProgress = false
@@ -232,10 +234,14 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
       return .terminateLater
     }
 
+    let occurredAtUtc = powerEventTimestampFormatter.string(from: Date())
+    terminationRequestGeneration += 1
+    let requestGeneration = terminationRequestGeneration
     terminationRequestInProgress = true
     terminationRequestDeliveredToDart = false
+    terminationRequestOccurredAtUtc = occurredAtUtc
     terminationReplyApplication = sender
-    scheduleTerminationTimeout()
+    scheduleTerminationTimeout(requestGeneration: requestGeneration)
     deliverTerminationRequestIfReady()
     return .terminateLater
   }
@@ -520,10 +526,10 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     ]
   }
 
-  private func scheduleTerminationTimeout() {
+  private func scheduleTerminationTimeout(requestGeneration: Int) {
     terminationTimeout?.cancel()
     let timeout = DispatchWorkItem { [weak self] in
-      self?.finishNativeTermination()
+      self?.finishNativeTermination(requestGeneration: requestGeneration)
     }
     terminationTimeout = timeout
     DispatchQueue.main.asyncAfter(
@@ -536,18 +542,24 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     guard terminationRequestInProgress,
           lifecycleReady,
           !terminationRequestDeliveredToDart,
+          let occurredAtUtc = terminationRequestOccurredAtUtc,
           let lifecycleChannel else {
       return
     }
 
+    let requestGeneration = terminationRequestGeneration
     terminationRequestDeliveredToDart = true
-    lifecycleChannel.invokeMethod("terminationRequested", arguments: nil) { [weak self] _ in
-      self?.finishNativeTermination()
+    lifecycleChannel.invokeMethod(
+      "prepareForTermination",
+      arguments: ["occurredAtUtc": occurredAtUtc]
+    ) { [weak self] _ in
+      self?.finishNativeTermination(requestGeneration: requestGeneration)
     }
   }
 
-  private func finishNativeTermination() {
-    guard terminationRequestInProgress else {
+  private func finishNativeTermination(requestGeneration: Int) {
+    guard terminationRequestInProgress,
+          terminationRequestGeneration == requestGeneration else {
       return
     }
 
@@ -555,6 +567,7 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     terminationTimeout = nil
     terminationRequestInProgress = false
     terminationRequestDeliveredToDart = false
+    terminationRequestOccurredAtUtc = nil
     terminationReplyApplication?.reply(toApplicationShouldTerminate: true)
     terminationReplyApplication = nil
   }

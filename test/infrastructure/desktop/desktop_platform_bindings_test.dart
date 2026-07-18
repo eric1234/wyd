@@ -245,6 +245,7 @@ final class _FakeLinuxLifecyclePowerAdapter
 
   @override
   Future<void> initialize(
-    Future<void> Function() onTerminationRequested,
+    Future<void> Function(NativeTerminationOccurrence occurrence)
+    onTerminationRequested,
   ) async {}
 }

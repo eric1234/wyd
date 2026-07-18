@@ -19,6 +19,18 @@ awkward for a small utility that is meant to live quietly in the system tray.
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for local setup, useful commands,
 testing workflows, and contribution guidelines.
 
+## Development Snapshots
+
+The [latest snapshot](https://github.com/eric1234/wyd/releases/tag/snapshot)
+provides unsigned development builds from `main` for Linux x64, macOS Apple
+Silicon, and Windows x64. These are complete Flutter desktop bundles rather
+than installers; extract the entire ZIP before running the app.
+
+Snapshots may be less stable than formal releases and operating systems may
+warn about their unsigned binaries. The About window identifies snapshot
+builds with version `0.0.0`, a build number, and the source commit. Linux users
+should also review the platform dependency notes below.
+
 ## Platform Support Notes
 
 Platforms:

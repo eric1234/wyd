@@ -1,0 +1,497 @@
+name: Snapshot
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshot-release
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.41.7
+
+jobs:
+  discover:
+    name: Check for changes
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.changes.outputs.commit }}
+      should-build: ${{ steps.changes.outputs.should-build }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Compare with published snapshot
+        id: changes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit="$(git rev-parse HEAD)"
+          published="$(git ls-remote --refs origin refs/tags/snapshot | cut -f1)"
+          release_commit="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq '.body | capture("<!-- snapshot-commit: (?<sha>[0-9a-f]{40}) -->").sha' \
+            2>/dev/null || true)"
+          release_draft="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft' \
+            2>/dev/null || true)"
+          release_assets="$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '[.assets[].name] | sort | join(",")' \
+            2>/dev/null || true)"
+          expected_assets='wyd-snapshot-linux-x64.zip,wyd-snapshot-macos-arm64.zip,wyd-snapshot-windows-x64.zip'
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if [[ "$commit" == "$published" && \
+                "$commit" == "$release_commit" && \
+                "$release_draft" == 'false' && \
+                "$release_assets" == "$expected_assets" ]]; then
+            echo "should-build=false" >> "$GITHUB_OUTPUT"
+            echo "Snapshot already represents $commit."
+          else
+            echo "should-build=true" >> "$GITHUB_OUTPUT"
+            echo "Building $commit (published: ${published:-none})."
+          fi
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: discover
+    if: needs.discover.outputs.should-build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-24.04
+            desktop: linux
+            asset: wyd-snapshot-linux-x64.zip
+          - platform: macos
+            os: macos-15
+            desktop: macos
+            asset: wyd-snapshot-macos-arm64.zip
+          - platform: windows
+            os: windows-2025
+            desktop: windows
+            asset: wyd-snapshot-windows-x64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out snapshot commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover.outputs.commit }}
+
+      - name: Refresh Linux package indexes
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update
+
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'linux'
+        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        with:
+          packages: clang cmake libayatana-appindicator3-dev libxcb-screensaver0-dev lld-18 llvm-18 ninja-build
+          version: wyd-snapshot-linux-deps-v1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Enable desktop support
+        run: flutter config --enable-${{ matrix.desktop }}-desktop
+
+      - name: Install Dart and Flutter dependencies
+        run: flutter pub get
+
+      - name: Build release bundle
+        run: >-
+          flutter build ${{ matrix.desktop }} --release
+          --build-name=0.0.0
+          --build-number=${{ github.run_number }}
+          --dart-define=WYD_SNAPSHOT_COMMIT=${{ needs.discover.outputs.commit }}
+
+      - name: Archive Linux bundle
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          test -x build/linux/x64/release/bundle/wyd
+          test -d build/linux/x64/release/bundle/data
+          test -d build/linux/x64/release/bundle/lib
+          mkdir -p dist/wyd
+          cp -a build/linux/x64/release/bundle/. dist/wyd/
+          (cd dist && zip -qr "${{ matrix.asset }}" wyd)
+          rm -rf dist/wyd
+
+      - name: Archive macOS bundle
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          test -x build/macos/Build/Products/Release/wyd.app/Contents/MacOS/wyd
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/macos/Build/Products/Release/wyd.app \
+            "dist/${{ matrix.asset }}"
+
+      - name: Archive Windows bundle
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $bundle = 'build/windows/x64/runner/Release'
+          if (-not (Test-Path "$bundle/wyd.exe" -PathType Leaf)) { throw 'Missing wyd.exe' }
+          if (-not (Test-Path "$bundle/data" -PathType Container)) { throw 'Missing data directory' }
+
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vsWhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest `
+            -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            throw 'Unable to locate the Visual Studio installation'
+          }
+
+          $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
+          $runtimeFile = Get-ChildItem $redistRoot -Recurse -File `
+            -Filter 'vcruntime140.dll' |
+            Where-Object {
+              $_.Directory.Name -like 'Microsoft.VC*.CRT' -and
+              $_.Directory.Parent.Name -eq 'x64'
+            } |
+            Sort-Object {
+              $version = $_.VersionInfo
+              [version]::new(
+                $version.FileMajorPart,
+                $version.FileMinorPart,
+                $version.FileBuildPart,
+                $version.FilePrivatePart
+              )
+            } -Descending |
+            Select-Object -First 1
+          if (-not $runtimeFile) { throw 'Unable to locate the VC++ runtime' }
+          $crtDirectory = $runtimeFile.Directory
+          Write-Host "Using VC++ runtime $($runtimeFile.VersionInfo.FileVersion)"
+
+          @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') |
+            ForEach-Object {
+              $runtime = Join-Path $crtDirectory.FullName $_
+              if (-not (Test-Path $runtime -PathType Leaf)) {
+                throw "Missing VC++ runtime: $_"
+              }
+              Copy-Item $runtime $bundle
+            }
+
+          New-Item -ItemType Directory -Force dist/wyd | Out-Null
+          Copy-Item "$bundle/*" dist/wyd -Recurse
+          Compress-Archive -Path dist/wyd -DestinationPath "dist/${{ matrix.asset }}"
+          Remove-Item dist/wyd -Recurse -Force
+
+      - name: Upload snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-${{ matrix.platform }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    name: Publish snapshot
+    needs: [discover, build]
+    if: needs.discover.outputs.should-build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SNAPSHOT_COMMIT: ${{ needs.discover.outputs.commit }}
+    steps:
+      - name: Download snapshot artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: snapshot-*
+          path: dist
+          merge-multiple: true
+
+      - name: Validate snapshot assets
+        shell: bash
+        run: |
+          assets=(
+            wyd-snapshot-linux-x64.zip
+            wyd-snapshot-macos-arm64.zip
+            wyd-snapshot-windows-x64.zip
+          )
+          for asset in "${assets[@]}"; do
+            test -s "dist/$asset"
+          done
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
+
+      - name: Stage snapshot assets
+        id: release
+        shell: bash
+        run: |
+          assets=(
+            wyd-snapshot-linux-x64.zip
+            wyd-snapshot-macos-arm64.zip
+            wyd-snapshot-windows-x64.zip
+          )
+          short_commit="${SNAPSHOT_COMMIT:0:7}"
+          built_at="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          notes="$(mktemp)"
+          cat > "$notes" <<EOF
+          Automated, unsigned development snapshot of [\`$short_commit\`](https://github.com/${GITHUB_REPOSITORY}/commit/${SNAPSHOT_COMMIT}).
+
+          - Built: $built_at
+          - Flutter: $FLUTTER_VERSION
+          - Platforms: Linux x64, macOS Apple Silicon, Windows x64
+
+          These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
+
+          <!-- snapshot-commit: $SNAPSHOT_COMMIT -->
+          EOF
+
+          if gh release view snapshot --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_id="$(gh release view snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --json databaseId \
+              --jq '.databaseId')"
+          else
+            gh release create snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SNAPSHOT_COMMIT" \
+              --title "Latest snapshot" \
+              --notes-file "$notes" \
+              --prerelease \
+              --draft \
+              --latest=false
+            release_id="$(gh release view snapshot \
+              --repo "$GITHUB_REPOSITORY" \
+              --json databaseId \
+              --jq '.databaseId')"
+          fi
+          echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
+
+          asset_id() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              --jq ".assets[] | select(.name == \"$1\") | .id"
+          }
+
+          for asset in "${assets[@]}"; do
+            stable_id="$(asset_id "$asset")"
+            previous_id="$(asset_id "$asset.previous")"
+            if [[ -n "$previous_id" ]]; then
+              if [[ -n "$stable_id" ]]; then
+                gh api --method DELETE \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}"
+              else
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}" \
+                  -f name="$asset" >/dev/null
+              fi
+            fi
+
+            next_id="$(asset_id "$asset.next")"
+            if [[ -n "$next_id" ]]; then
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}"
+            fi
+          done
+
+          mkdir -p staged
+          for asset in "${assets[@]}"; do
+            cp "dist/$asset" "staged/$asset.next"
+          done
+          gh release upload snapshot staged/* --repo "$GITHUB_REPOSITORY"
+
+          for asset in "${assets[@]}"; do
+            next_id="$(asset_id "$asset.next")"
+            test -n "$next_id"
+            expected_digest="sha256:$(sha256sum "dist/$asset" | cut -d' ' -f1)"
+            actual_digest="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}" \
+              --jq '.digest')"
+            test "$actual_digest" = "$expected_digest"
+          done
+
+      - name: Promote snapshot assets
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.release-id }}
+        run: |
+          assets=(
+            wyd-snapshot-linux-x64.zip
+            wyd-snapshot-macos-arm64.zip
+            wyd-snapshot-windows-x64.zip
+          )
+          asset_id() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              --jq ".assets[] | select(.name == \"$1\") | .id"
+          }
+
+          old_tag_sha="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/snapshot" \
+            --jq '.[] | select(.ref == "refs/tags/snapshot") | .object.sha')"
+          old_body="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.body // ""')"
+          old_name="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.name // ""')"
+          old_draft="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.draft')"
+          old_prerelease="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.prerelease')"
+          touched=()
+          committed=false
+          rollback() {
+            if [[ "$committed" == 'true' ]]; then
+              trap - ERR INT TERM
+              return
+            fi
+            trap - ERR
+            trap '' INT TERM
+            set +e
+
+            for asset in "${touched[@]}"; do
+              stable_id="$(asset_id "$asset")"
+              previous_id="$(asset_id "$asset.previous")"
+              next_id="$(asset_id "$asset.next")"
+
+              if [[ -n "$previous_id" ]]; then
+                if [[ -n "$stable_id" && -z "$next_id" ]]; then
+                  gh api --method PATCH \
+                    "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                    -f name="$asset.next" >/dev/null || true
+                fi
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${previous_id}" \
+                  -f name="$asset" >/dev/null || true
+              elif [[ -n "$stable_id" && -z "$next_id" ]]; then
+                gh api --method PATCH \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                  -f name="$asset.next" >/dev/null || true
+              fi
+            done
+
+            if [[ -n "$old_tag_sha" ]]; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/snapshot" \
+                -f sha="$old_tag_sha" \
+                -F force=true >/dev/null || true
+            else
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/snapshot" \
+                >/dev/null 2>&1 || true
+            fi
+
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -f name="$old_name" \
+              -f body="$old_body" \
+              -F draft="$old_draft" \
+              -F prerelease="$old_prerelease" \
+              -f make_latest='false' >/dev/null || true
+            exit 1
+          }
+          trap rollback ERR INT TERM
+
+          for asset in "${assets[@]}"; do
+            stable_id="$(asset_id "$asset")"
+            next_id="$(asset_id "$asset.next")"
+            test -n "$next_id"
+            touched+=("$asset")
+
+            if [[ -n "$stable_id" ]]; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+                -f name="$asset.previous" >/dev/null
+            fi
+
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${next_id}" \
+              -f name="$asset" >/dev/null
+          done
+
+          for asset in "${assets[@]}"; do
+            stable_id="$(asset_id "$asset")"
+            test -n "$stable_id"
+            expected_digest="sha256:$(sha256sum "dist/$asset" | cut -d' ' -f1)"
+            actual_digest="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${stable_id}" \
+              --jq '.digest')"
+            test "$actual_digest" = "$expected_digest"
+          done
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" >/dev/null 2>&1; then
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/snapshot" \
+              -f sha="$SNAPSHOT_COMMIT" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref='refs/tags/snapshot' \
+              -f sha="$SNAPSHOT_COMMIT" >/dev/null
+          fi
+
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" \
+            --jq '.object.sha')" = "$SNAPSHOT_COMMIT"
+
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -f tag_name='snapshot' \
+            -f name='Latest snapshot' \
+            -f body="$(cat <<EOF
+          Automated, unsigned development snapshot of [\`${SNAPSHOT_COMMIT:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${SNAPSHOT_COMMIT}).
+
+          - Built: $(date -u +'%Y-%m-%d %H:%M UTC')
+          - Flutter: $FLUTTER_VERSION
+          - Platforms: Linux x64, macOS Apple Silicon, Windows x64
+
+          These are complete Flutter desktop bundles, not installers. Extract the entire archive before running the app. Operating systems may warn about the unsigned binaries. Linux users should review the [platform dependency notes](https://github.com/${GITHUB_REPOSITORY}#platform-support-notes).
+
+          <!-- snapshot-commit: $SNAPSHOT_COMMIT -->
+          EOF
+          )" \
+            -F draft=false \
+            -F prerelease=true \
+            -f make_latest='false' >/dev/null
+
+          committed=true
+          trap - ERR INT TERM
+
+          release_assets="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")"
+          while IFS=$'\t' read -r existing_id existing_name; do
+            keep=false
+            for asset in "${assets[@]}"; do
+              if [[ "$existing_name" == "$asset" ]]; then
+                keep=true
+                break
+              fi
+            done
+            if [[ "$keep" == 'false' ]]; then
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}" || true
+            fi
+          done < <(jq -r '.assets[] | [.id, .name] | @tsv' <<< "$release_assets")
+
+          test "$(gh release view snapshot \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft')" = 'false'
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/snapshot" \
+            --jq '.object.sha')" = "$SNAPSHOT_COMMIT"

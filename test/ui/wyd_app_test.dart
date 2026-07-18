@@ -71,7 +71,11 @@ void main() {
       WydChildWindowApp(
         role: WindowRole.about,
         aboutInfoLoader: () async {
-          return const AboutAppInfo(version: '1.2.3', buildNumber: '4');
+          return const AboutAppInfo(
+            version: '1.2.3',
+            buildNumber: '4',
+            snapshotCommit: 'a8e03a3123456789',
+          );
         },
         aboutLinkLauncher: (url) async {
           launchedUrl = url;
@@ -87,11 +91,28 @@ void main() {
     expect(find.text('Author: Eric Anderson'), findsOneWidget);
     expect(find.text('Version 1.2.3'), findsOneWidget);
     expect(find.text('Build 4'), findsOneWidget);
+    expect(find.text('Snapshot a8e03a3'), findsOneWidget);
     expect(find.text(WydAboutMetadata.website), findsOneWidget);
 
     await tester.tap(find.text(WydAboutMetadata.website));
 
     expect(launchedUrl, WydAboutMetadata.websiteUri);
+  });
+
+  testWidgets('about child window omits snapshot metadata for releases', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      WydChildWindowApp(
+        role: WindowRole.about,
+        aboutInfoLoader: () async {
+          return const AboutAppInfo(version: '1.2.3', buildNumber: '4');
+        },
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('Snapshot '), findsNothing);
   });
 
   testWidgets('about link launcher failures show an error message', (

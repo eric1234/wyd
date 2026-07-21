@@ -174,6 +174,66 @@ void main() {
       expect(harness.inhibitors.single.released, isFalse);
     });
 
+    test(
+      'logind stream failure releases inhibitor and prevents reacquisition',
+      () async {
+        final harness = await _Harness.create();
+        addTearDown(harness.dispose);
+        final occurrences = <PowerEventOccurrence>[];
+        await harness.adapter.initializeAcknowledged((occurrence) async {
+          occurrences.add(occurrence);
+        });
+
+        harness.emitLogindError(LinuxLogindSignalKind.prepareForSleep);
+        await harness.inhibitors.single.releasedFuture;
+        harness.emitLogind(LinuxLogindSignalKind.prepareForSleep, false);
+        harness.emitLogind(LinuxLogindSignalKind.prepareForShutdown, true);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(harness.inhibitors, hasLength(1));
+        expect(harness.inhibitors.single.released, isTrue);
+        expect(occurrences, isEmpty);
+      },
+    );
+
+    test('lock stream failure does not disable logind inhibitor', () async {
+      final lockSource = LinuxDbusPowerEventAdapter.knownSources.firstWhere(
+        (source) => source.isLockSource,
+      );
+      final harness = await _Harness.create(lockSources: [lockSource]);
+      addTearDown(harness.dispose);
+      final occurrences = <PowerEventOccurrence>[];
+      await harness.adapter.initializeAcknowledged((occurrence) async {
+        occurrences.add(occurrence);
+      });
+
+      harness.emitLockError(lockSource);
+      harness.emitLogind(LinuxLogindSignalKind.prepareForSleep, true);
+      await harness.inhibitors.single.releasedFuture;
+
+      expect(occurrences.single.event, PowerEvent.sleep);
+    });
+
+    test('logind failure invalidates pending inhibitor acquisition', () async {
+      final inhibitorCompleter = Completer<LinuxLogindInhibitor>();
+      final harness = await _Harness.create(
+        acquireInhibitor: (_) => inhibitorCompleter.future,
+      );
+      addTearDown(harness.dispose);
+
+      final initializeFuture = harness.adapter.initializeAcknowledged(
+        (_) async {},
+      );
+      harness.emitLogindError(LinuxLogindSignalKind.prepareForShutdown);
+      final lateInhibitor = _FakeInhibitor();
+      harness.inhibitors.add(lateInhibitor);
+      inhibitorCompleter.complete(lateInhibitor);
+      await initializeFuture;
+      await lateInhibitor.releasedFuture;
+
+      expect(lateInhibitor.released, isTrue);
+    });
+
     test('serializes events while an acknowledgement is pending', () async {
       final lockSource = LinuxDbusPowerEventAdapter.knownSources.firstWhere(
         (source) => source.isLockSource,
@@ -484,8 +544,16 @@ final class _Harness {
     logindControllers[kind]!.add([DBusBoolean(value)]);
   }
 
+  void emitLogindError(LinuxLogindSignalKind kind) {
+    logindControllers[kind]!.addError(StateError('logind stream failed'));
+  }
+
   void emitLock(LinuxDbusPowerEventSource source, bool value) {
     lockControllers[source]!.add([DBusBoolean(value)]);
+  }
+
+  void emitLockError(LinuxDbusPowerEventSource source) {
+    lockControllers[source]!.addError(StateError('lock stream failed'));
   }
 
   Future<void> dispose() async {

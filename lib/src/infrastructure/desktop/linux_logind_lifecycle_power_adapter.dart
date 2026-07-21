@@ -171,6 +171,7 @@ final class LinuxLogindLifecyclePowerAdapter
   Future<void> _eventChain = Future.value();
   bool _started = false;
   bool _disposed = false;
+  bool _logindMonitoringFailed = false;
   bool _shutdownStartPendingCancellation = false;
   int _inhibitorAcquisitionGeneration = 0;
 
@@ -211,7 +212,7 @@ final class LinuxLogindLifecyclePowerAdapter
     for (final signal in logindSignals) {
       final subscription = _logindSignalValueStreamFactory(signal).listen(
         (values) => _enqueue(() => _handleLogindSignal(signal, values)),
-        onError: _logSignalStreamError,
+        onError: _handleLogindSignalStreamError,
       );
       _subscriptions.add(subscription);
     }
@@ -244,6 +245,9 @@ final class LinuxLogindLifecyclePowerAdapter
     LinuxLogindSignal signal,
     List<DBusValue> values,
   ) async {
+    if (_logindMonitoringFailed) {
+      return;
+    }
     final started = _singleBooleanValue(signal.label, values);
     if (!started) {
       await _handleLogindSignalEnded(signal);
@@ -316,7 +320,7 @@ final class LinuxLogindLifecyclePowerAdapter
   }
 
   Future<void> _acquireInhibitorIfNeeded() async {
-    if (_disposed || _inhibitor != null) {
+    if (_disposed || _logindMonitoringFailed || _inhibitor != null) {
       return;
     }
     late final Future<LinuxLogindInhibitor> acquireFuture;
@@ -390,8 +394,18 @@ final class LinuxLogindLifecyclePowerAdapter
     await inhibitor.release();
   }
 
-  void _logSignalStreamError(Object error, StackTrace stackTrace) {
+  void _handleLogindSignalStreamError(Object error, StackTrace stackTrace) {
     _logger.error('Linux logind signal stream failed', error, stackTrace);
+    if (_disposed || _logindMonitoringFailed) {
+      return;
+    }
+    _logindMonitoringFailed = true;
+    _inhibitorAcquisitionGeneration += 1;
+    _enqueue(_releaseInhibitor);
+  }
+
+  void _logSignalStreamError(Object error, StackTrace stackTrace) {
+    _logger.error('Linux lock signal stream failed', error, stackTrace);
   }
 
   static Future<LinuxLogindInhibitor> _acquireDbusInhibitor(

@@ -11,6 +11,11 @@ private let macOSIOMessageCanSystemSleep: UInt32 = 0xe0000270
 private let macOSIOMessageSystemWillSleep: UInt32 = 0xe0000280
 private let macOSScreenIsLockedNotification = Notification.Name("com.apple.screenIsLocked")
 
+private struct PendingPowerEvent {
+  let event: String
+  let occurredAtUtc: String
+}
+
 @main
 class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   private let clearDataFlag = "--clear-data"
@@ -25,6 +30,8 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   private var singleInstanceReady = false
   private var lifecycleReady = false
   private var acknowledgedPowerEventsReady = false
+  private var pendingPowerEvents: [PendingPowerEvent] = []
+  private var acknowledgedPowerEventDeliveryInProgress = false
   private var terminationRequestGeneration = 0
   private var terminationRequestInProgress = false
   private var terminationRequestDeliveredToDart = false
@@ -345,6 +352,9 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
 
       self?.acknowledgedPowerEventsReady = true
       result(nil)
+      DispatchQueue.main.async { [weak self] in
+        self?.drainPendingPowerEvents()
+      }
     }
   }
 
@@ -451,16 +461,7 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   }
 
   private func sendBestEffortPowerEvent(_ event: String) {
-    guard acknowledgedPowerEventsReady,
-          let acknowledgedPowerEventChannel else {
-      sendPowerEvent(event)
-      return
-    }
-
-    acknowledgedPowerEventChannel.invokeMethod(
-      "powerEvent",
-      arguments: powerEventArguments(event: event)
-    )
+    enqueuePowerEvent(event)
   }
 
   private func sendPowerEvent(_ event: String) {
@@ -468,10 +469,15 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
   }
 
   private func acknowledgeSleepBeforePowerChange(argument: UnsafeMutableRawPointer?) {
-    guard acknowledgedPowerEventsReady,
-          let acknowledgedPowerEventChannel,
+    let occurrence = makePowerEvent(event: "sleep")
+    guard acknowledgedPowerEventsReady else {
+      enqueuePowerEvent(occurrence)
+      allowPowerChange(argument: argument)
+      return
+    }
+    guard let acknowledgedPowerEventChannel,
           !sleepPowerChangeInProgress else {
-      sendPowerEvent("sleep")
+      enqueuePowerEvent(occurrence)
       allowPowerChange(argument: argument)
       return
     }
@@ -489,9 +495,42 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     )
     acknowledgedPowerEventChannel.invokeMethod(
       "powerEvent",
-      arguments: powerEventArguments(event: "sleep")
+      arguments: powerEventArguments(occurrence)
     ) { [weak self] _ in
       self?.finishSleepPowerChange(notificationID: notificationID)
+    }
+  }
+
+  private func enqueuePowerEvent(_ event: String) {
+    enqueuePowerEvent(makePowerEvent(event: event))
+  }
+
+  private func enqueuePowerEvent(_ occurrence: PendingPowerEvent) {
+    pendingPowerEvents.append(occurrence)
+    drainPendingPowerEvents()
+  }
+
+  private func drainPendingPowerEvents() {
+    guard acknowledgedPowerEventsReady,
+          !acknowledgedPowerEventDeliveryInProgress,
+          let acknowledgedPowerEventChannel,
+          let occurrence = pendingPowerEvents.first else {
+      return
+    }
+
+    acknowledgedPowerEventDeliveryInProgress = true
+    acknowledgedPowerEventChannel.invokeMethod(
+      "powerEvent",
+      arguments: powerEventArguments(occurrence)
+    ) { [weak self] _ in
+      guard let self else {
+        return
+      }
+      if !self.pendingPowerEvents.isEmpty {
+        self.pendingPowerEvents.removeFirst()
+      }
+      self.acknowledgedPowerEventDeliveryInProgress = false
+      self.drainPendingPowerEvents()
     }
   }
 
@@ -519,10 +558,17 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     IOAllowPowerChange(systemPowerConnection, notificationID)
   }
 
-  private func powerEventArguments(event: String) -> [String: String] {
+  private func makePowerEvent(event: String) -> PendingPowerEvent {
+    return PendingPowerEvent(
+      event: event,
+      occurredAtUtc: powerEventTimestampFormatter.string(from: Date())
+    )
+  }
+
+  private func powerEventArguments(_ occurrence: PendingPowerEvent) -> [String: String] {
     return [
-      "event": event,
-      "occurredAtUtc": powerEventTimestampFormatter.string(from: Date()),
+      "event": occurrence.event,
+      "occurredAtUtc": occurrence.occurredAtUtc,
     ]
   }
 

@@ -510,8 +510,7 @@ void FlutterWindow::EnqueueNativeEventAndWait(NativeEventKind kind,
 }
 
 void FlutterWindow::DrainNativeEvents() {
-  if (tearing_down_ || !lifecycle_ready_ || !power_events_ready_ ||
-      !lifecycle_channel_ || !acknowledged_power_event_channel_) {
+  if (tearing_down_) {
     return;
   }
 
@@ -524,6 +523,29 @@ void FlutterWindow::DrainNativeEvents() {
       continue;
     }
     if (state == NativeEventState::kAwaitingReply) {
+      return;
+    }
+
+    const bool event_ready = event->kind == NativeEventKind::kTermination
+                                 ? lifecycle_ready_ && lifecycle_channel_
+                                 : power_events_ready_ &&
+                                       acknowledged_power_event_channel_;
+    if (!event_ready) {
+      if (event->kind != NativeEventKind::kTermination && lifecycle_ready_ &&
+          lifecycle_channel_) {
+        std::shared_ptr<NativeEvent> pending_termination;
+        for (const auto& candidate : native_events_) {
+          if (candidate->kind == NativeEventKind::kTermination &&
+              candidate->state.load() == NativeEventState::kPending) {
+            pending_termination = candidate;
+            break;
+          }
+        }
+        if (pending_termination) {
+          ExpireNativeEventsBefore(pending_termination);
+          continue;
+        }
+      }
       return;
     }
 

@@ -4,6 +4,7 @@ export 'activity_log.dart';
 export 'autocomplete.dart';
 export 'lifecycle.dart';
 export 'report.dart';
+export 'report_breakdown.dart';
 export 'runtime_state.dart';
 export 'settings.dart';
 export 'task_tag.dart';

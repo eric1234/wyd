@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../domain/domain.dart';
 import '../layout_metrics.dart';
+import 'report_breakdown_chart.dart';
 import 'report_controller.dart';
 
 class ReportView extends StatefulWidget {
@@ -18,6 +19,7 @@ class ReportView extends StatefulWidget {
 
 class _ReportViewState extends State<ReportView> {
   ReportState _state = const ReportState();
+  String? _shownPreferenceError;
 
   @override
   void initState() {
@@ -100,27 +102,37 @@ class _ReportViewState extends State<ReportView> {
                   ),
                 )
               else ...[
-                _TotalCard(duration: report.totalDuration),
-                SizedBox(height: sectionGap),
                 Expanded(
-                  child: Card(
-                    margin: EdgeInsets.zero,
-                    clipBehavior: Clip.antiAlias,
-                    child: ListView.separated(
-                      itemCount: report.rows.length,
-                      separatorBuilder: (context, index) =>
-                          const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final row = report.rows[index];
-                        return _ReportRowTile(
-                          key: ValueKey(
-                            '$rowKeyPrefix-${row.taskTextNormalized}',
-                          ),
-                          row: row,
-                          controller: widget.controller,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final visualization = _VisualizationPane(
+                        state: _state,
+                        controller: widget.controller,
+                      );
+                      final taskList = _TaskList(
+                        report: report,
+                        rowKeyPrefix: rowKeyPrefix,
+                        controller: widget.controller,
+                      );
+                      if (constraints.maxWidth >= 760) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(width: 340, child: visualization),
+                            SizedBox(width: sectionGap),
+                            Expanded(child: taskList),
+                          ],
                         );
-                      },
-                    ),
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(height: 330, child: visualization),
+                          SizedBox(height: sectionGap),
+                          Expanded(child: taskList),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ],
@@ -133,8 +145,239 @@ class _ReportViewState extends State<ReportView> {
 
   void _controllerChanged() {
     if (mounted) {
-      setState(() => _state = widget.controller.state);
+      final next = widget.controller.state;
+      setState(() => _state = next);
+      final preferenceError = next.preferenceErrorMessage;
+      if (preferenceError != null && preferenceError != _shownPreferenceError) {
+        _shownPreferenceError = preferenceError;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(preferenceError)));
+          widget.controller.clearPreferenceError();
+        });
+      }
     }
+  }
+}
+
+class _TaskList extends StatelessWidget {
+  const _TaskList({
+    required this.report,
+    required this.rowKeyPrefix,
+    required this.controller,
+  });
+
+  final ActivityReport report;
+  final String rowKeyPrefix;
+  final ReportController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: ListView.separated(
+        itemCount: report.rows.length,
+        separatorBuilder: (context, index) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final row = report.rows[index];
+          return _ReportRowTile(
+            key: ValueKey('$rowKeyPrefix-${row.taskTextNormalized}'),
+            row: row,
+            controller: controller,
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _VisualizationPane extends StatelessWidget {
+  const _VisualizationPane({required this.state, required this.controller});
+
+  final ReportState state;
+  final ReportController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+    final preferences =
+        state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: metrics.insetsAll(0.75),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<ReportGroupingMode>(
+              key: ValueKey(preferences.mode),
+              initialValue: preferences.mode,
+              decoration: const InputDecoration(
+                labelText: 'Group chart by',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: ReportGroupingMode.task,
+                  child: Text('Tasks'),
+                ),
+                DropdownMenuItem(
+                  value: ReportGroupingMode.tags,
+                  child: Text('Tags'),
+                ),
+              ],
+              onChanged: (mode) {
+                if (mode != null) unawaited(controller.setGroupingMode(mode));
+              },
+            ),
+            if (preferences.mode == ReportGroupingMode.tags) ...[
+              SizedBox(height: metrics.space(0.5)),
+              _TagLevelControls(
+                preferences: preferences,
+                availableTags: state.availableTags,
+                controller: controller,
+              ),
+            ],
+            SizedBox(height: metrics.space(0.5)),
+            Expanded(
+              child: state.breakdown == null
+                  ? const SizedBox.shrink()
+                  : state.breakdown!.nodes.isEmpty
+                  ? Center(
+                      child: Text(
+                        preferences.mode == ReportGroupingMode.tags
+                            ? 'Select tags for level 1 to build the chart.'
+                            : 'No chart data.',
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : ReportBreakdownVisualization(breakdown: state.breakdown!),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TagLevelControls extends StatelessWidget {
+  const _TagLevelControls({
+    required this.preferences,
+    required this.availableTags,
+    required this.controller,
+  });
+
+  final ReportVisualizationPreferences preferences;
+  final List<TaskTag> availableTags;
+  final ReportController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (
+          var levelIndex = 0;
+          levelIndex < preferences.tagLevels.length;
+          levelIndex += 1
+        )
+          _TagLevelRow(
+            levelIndex: levelIndex,
+            preferences: preferences,
+            availableTags: availableTags,
+            controller: controller,
+          ),
+        if (preferences.tagLevels.length <
+            ReportVisualizationPreferences.maxTagLevels)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => unawaited(controller.addTagLevel()),
+              icon: const Icon(Icons.add),
+              label: const Text('Add level'),
+            ),
+          ),
+        Text(
+          'Tasks with no selected tag use Untagged; tasks matching more than one use Multiple.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+}
+
+class _TagLevelRow extends StatelessWidget {
+  const _TagLevelRow({
+    required this.levelIndex,
+    required this.preferences,
+    required this.availableTags,
+    required this.controller,
+  });
+
+  final int levelIndex;
+  final ReportVisualizationPreferences preferences;
+  final List<TaskTag> availableTags;
+  final ReportController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = preferences.tagLevels[levelIndex].tagTextNormalizedValues;
+    final usedElsewhere = <String>{
+      for (var index = 0; index < preferences.tagLevels.length; index += 1)
+        if (index != levelIndex)
+          ...preferences.tagLevels[index].tagTextNormalizedValues,
+    };
+    return Row(
+      children: [
+        Expanded(
+          child: MenuAnchor(
+            builder: (context, menuController, child) {
+              return OutlinedButton(
+                onPressed: menuController.isOpen
+                    ? menuController.close
+                    : menuController.open,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    selected.isEmpty
+                        ? 'Level ${levelIndex + 1}: Select tags'
+                        : 'Level ${levelIndex + 1}: ${selected.length} selected',
+                  ),
+                ),
+              );
+            },
+            menuChildren: [
+              for (final tag in availableTags)
+                if (!usedElsewhere.contains(tag.normalized))
+                  CheckboxMenuButton(
+                    value: selected.contains(tag.normalized),
+                    onChanged: (checked) {
+                      final next = selected.toList();
+                      if (checked ?? false) {
+                        next.add(tag.normalized);
+                      } else {
+                        next.remove(tag.normalized);
+                      }
+                      unawaited(controller.setTagLevel(levelIndex, next));
+                    },
+                    child: Text(tag.text),
+                  ),
+            ],
+          ),
+        ),
+        if (preferences.tagLevels.length > 1)
+          IconButton(
+            tooltip: 'Remove level ${levelIndex + 1}',
+            onPressed: () => unawaited(controller.removeTagLevel(levelIndex)),
+            icon: const Icon(Icons.close),
+          ),
+      ],
+    );
   }
 }
 
@@ -505,38 +748,6 @@ class _DateHeader extends StatelessWidget {
   }
 }
 
-class _TotalCard extends StatelessWidget {
-  const _TotalCard({required this.duration});
-
-  final Duration duration;
-
-  @override
-  Widget build(BuildContext context) {
-    final metrics = WydLayoutMetrics.of(context);
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: metrics.insetsAll(1),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Tracked in range',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            SizedBox(height: metrics.space(0.25)),
-            Text(
-              'Total: ${formatReportDuration(duration)}',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ReportStatus extends StatelessWidget {
   const _ReportStatus({
     required this.icon,
@@ -581,6 +792,9 @@ class _ReportStatus extends StatelessWidget {
 }
 
 String formatReportDuration(Duration duration) {
+  if (duration > Duration.zero && duration.inMinutes == 0) {
+    return '<1m';
+  }
   final hours = duration.inHours;
   final minutes = duration.inMinutes.remainder(60);
   if (hours == 0) {

@@ -7,6 +7,12 @@ abstract interface class ActivityReportLoader {
 
   Future<ActivityReport> loadReport(ReportDateRange dateRange);
 
+  Future<ReportVisualizationData> loadVisualizationData();
+
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  );
+
   Future<TaskTag> addTaskTag({
     required String taskTextNormalized,
     required String tagText,
@@ -16,6 +22,16 @@ abstract interface class ActivityReportLoader {
     required String taskTextNormalized,
     required String tagTextNormalized,
   });
+}
+
+final class ReportVisualizationData {
+  const ReportVisualizationData({
+    required this.availableTags,
+    required this.preferences,
+  });
+
+  final List<TaskTag> availableTags;
+  final ReportVisualizationPreferences preferences;
 }
 
 final class ReportService implements ActivityReportLoader {
@@ -79,6 +95,31 @@ final class ReportService implements ActivityReportLoader {
   }
 
   @override
+  Future<ReportVisualizationData> loadVisualizationData() {
+    return _transactions.run((transaction) async {
+      final availableTags = await transaction.taskTags.allTags();
+      final preferences = await transaction.reportPreferences.read();
+      final sanitized = _sanitizePreferences(preferences, availableTags);
+      if (sanitized != preferences) {
+        await transaction.reportPreferences.save(sanitized);
+      }
+      return ReportVisualizationData(
+        availableTags: availableTags,
+        preferences: sanitized,
+      );
+    });
+  }
+
+  @override
+  Future<void> saveVisualizationPreferences(
+    ReportVisualizationPreferences preferences,
+  ) {
+    return _transactions.run((transaction) {
+      return transaction.reportPreferences.save(preferences);
+    });
+  }
+
+  @override
   Future<TaskTag> addTaskTag({
     required String taskTextNormalized,
     required String tagText,
@@ -103,4 +144,19 @@ final class ReportService implements ActivityReportLoader {
       );
     });
   }
+}
+
+ReportVisualizationPreferences _sanitizePreferences(
+  ReportVisualizationPreferences preferences,
+  List<TaskTag> availableTags,
+) {
+  final available = availableTags.map((tag) => tag.normalized).toSet();
+  final levels = [
+    for (final level in preferences.tagLevels)
+      ReportTagLevel(level.tagTextNormalizedValues.where(available.contains)),
+  ];
+  while (levels.isNotEmpty && levels.last.tagTextNormalizedValues.isEmpty) {
+    levels.removeLast();
+  }
+  return preferences.copyWith(tagLevels: levels);
 }

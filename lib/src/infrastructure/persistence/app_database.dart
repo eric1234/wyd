@@ -9,7 +9,7 @@ import '../../domain/domain.dart';
 final class AppDatabase {
   AppDatabase._(this.database);
 
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
   static const databaseFileName = 'wyd.sqlite';
   static const _databaseSidecarSuffixes = ['-wal', '-shm', '-journal'];
 
@@ -169,6 +169,7 @@ CREATE TABLE app_state (
 
     await _createSettingsTable(database);
     await _createTaskTagsTable(database);
+    await _createReportPreferencesTables(database);
   }
 
   static Future<void> _upgradeDatabase(
@@ -191,6 +192,11 @@ CREATE TABLE app_state (
     if (currentVersion < 3) {
       await _upgradeToV3(database);
       currentVersion = 3;
+    }
+
+    if (currentVersion < 4) {
+      await _upgradeToV4(database);
+      currentVersion = 4;
     }
 
     if (currentVersion == newVersion) {
@@ -230,6 +236,10 @@ FROM settings_v1
     await _createTaskTagsTable(database);
   }
 
+  static Future<void> _upgradeToV4(Database database) async {
+    await _createReportPreferencesTables(database);
+  }
+
   static Future<void> _createSettingsTable(Database database) async {
     await database.execute('''
 CREATE TABLE settings (
@@ -261,6 +271,25 @@ CREATE TABLE task_tags (
     await database.execute('''
 CREATE INDEX idx_task_tags_tag_text_normalized
 ON task_tags (tag_text_normalized, task_text_normalized)
+''');
+  }
+
+  static Future<void> _createReportPreferencesTables(Database database) async {
+    await database.execute('''
+CREATE TABLE report_preferences (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  grouping_mode TEXT NOT NULL CHECK(grouping_mode IN ('task', 'tags'))
+)
+''');
+    await database.execute('''
+CREATE TABLE report_preference_tags (
+  level_index INTEGER NOT NULL CHECK(level_index BETWEEN 0 AND 1),
+  tag_text_normalized TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK(position >= 0),
+  PRIMARY KEY (level_index, tag_text_normalized),
+  UNIQUE (tag_text_normalized),
+  UNIQUE (level_index, position)
+)
 ''');
   }
 }

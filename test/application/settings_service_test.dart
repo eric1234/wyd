@@ -234,7 +234,8 @@ final class _FailingSettingsSaveTransaction implements AppTransaction {
     : activityLog = const _EmptyActivityLogRepository(),
       runtimeState = _MemoryRuntimeStateRepository(runner),
       settings = _FailingSettingsRepository(runner),
-      taskTags = const _EmptyTaskTagRepository();
+      taskTags = const _EmptyTaskTagRepository(),
+      reportPreferences = const _EmptyReportPreferencesRepository();
 
   @override
   final ActivityLogRepository activityLog;
@@ -247,6 +248,9 @@ final class _FailingSettingsSaveTransaction implements AppTransaction {
 
   @override
   final TaskTagRepository taskTags;
+
+  @override
+  final ReportPreferencesRepository reportPreferences;
 }
 
 final class _EmptyActivityLogRepository implements ActivityLogRepository {
@@ -281,6 +285,9 @@ final class _EmptyTaskTagRepository implements TaskTagRepository {
   const _EmptyTaskTagRepository();
 
   @override
+  Future<List<TaskTag>> allTags() async => const [];
+
+  @override
   Future<Map<String, List<TaskTag>>> tagsForTasks(
     Iterable<String> taskTextNormalizedValues,
   ) async => const {};
@@ -296,6 +303,18 @@ final class _EmptyTaskTagRepository implements TaskTagRepository {
     required String taskTextNormalized,
     required String tagTextNormalized,
   }) async {}
+}
+
+final class _EmptyReportPreferencesRepository
+    implements ReportPreferencesRepository {
+  const _EmptyReportPreferencesRepository();
+
+  @override
+  Future<ReportVisualizationPreferences> read() async =>
+      ReportVisualizationPreferences.defaults;
+
+  @override
+  Future<void> save(ReportVisualizationPreferences preferences) async {}
 }
 
 final class _MemoryRuntimeStateRepository implements RuntimeStateRepository {

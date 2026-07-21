@@ -33,6 +33,8 @@ abstract interface class SettingsRepository {
 }
 
 abstract interface class TaskTagRepository {
+  Future<List<TaskTag>> allTags();
+
   Future<Map<String, List<TaskTag>>> tagsForTasks(
     Iterable<String> taskTextNormalizedValues,
   );
@@ -48,6 +50,12 @@ abstract interface class TaskTagRepository {
   });
 }
 
+abstract interface class ReportPreferencesRepository {
+  Future<ReportVisualizationPreferences> read();
+
+  Future<void> save(ReportVisualizationPreferences preferences);
+}
+
 abstract interface class AppTransaction {
   ActivityLogRepository get activityLog;
 
@@ -56,6 +64,8 @@ abstract interface class AppTransaction {
   SettingsRepository get settings;
 
   TaskTagRepository get taskTags;
+
+  ReportPreferencesRepository get reportPreferences;
 }
 
 abstract interface class TransactionRunner {

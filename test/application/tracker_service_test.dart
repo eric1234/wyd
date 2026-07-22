@@ -113,9 +113,10 @@ void main() {
       harness.clock.current = DateTime.utc(2026, 1, 1, 10);
       final sleepAt = DateTime.utc(2026, 1, 1, 9, 30);
 
-      final result = await harness.service.stopForSystemBoundary(
+      final result = await harness.service.applyBoundary(
         source: ActivitySource.systemSleep,
         occurredAtUtc: sleepAt,
+        cleanShutdown: false,
       );
 
       expect(result.didStopActiveTask, isTrue);
@@ -130,9 +131,10 @@ void main() {
     test('system boundary stop is idempotent while idle', () async {
       final harness = _Harness();
 
-      final result = await harness.service.stopForSystemBoundary(
+      final result = await harness.service.applyBoundary(
         source: ActivitySource.systemLock,
         occurredAtUtc: harness.clock.current,
+        cleanShutdown: false,
       );
 
       expect(result.didStopActiveTask, isFalse);
@@ -247,8 +249,10 @@ void main() {
         harness.clock.current = DateTime.utc(2026, 1, 1, 10);
         final shutdownAt = DateTime.utc(2026, 1, 1, 9, 30);
 
-        final result = await harness.service.prepareForSystemShutdown(
+        final result = await harness.service.applyBoundary(
           occurredAtUtc: shutdownAt,
+          source: ActivitySource.exit,
+          cleanShutdown: true,
         );
 
         expect(result.didStopActiveTask, isTrue);
@@ -263,8 +267,10 @@ void main() {
     test('system shutdown preparation marks idle state clean', () async {
       final harness = _Harness();
 
-      final result = await harness.service.prepareForSystemShutdown(
+      final result = await harness.service.applyBoundary(
         occurredAtUtc: harness.clock.current,
+        source: ActivitySource.exit,
+        cleanShutdown: true,
       );
 
       expect(result.didStopActiveTask, isFalse);
@@ -283,9 +289,10 @@ void main() {
         harness.runner.failOnRuntimeSave = true;
 
         await expectLater(
-          () => harness.service.stopForSystemBoundary(
+          () => harness.service.applyBoundary(
             source: ActivitySource.systemLock,
             occurredAtUtc: harness.clock.current,
+            cleanShutdown: false,
           ),
           throwsStateError,
         );

@@ -18,8 +18,8 @@ final class AppSettingsValidationException implements Exception {
   }
 }
 
-final class SystemBoundaryResult {
-  const SystemBoundaryResult({
+final class TrackingBoundaryResult {
+  const TrackingBoundaryResult({
     required this.didStopActiveTask,
     required this.activeTask,
     required this.runtimeState,
@@ -88,19 +88,22 @@ final class TrackerService {
     });
   }
 
-  Future<SystemBoundaryResult> stopForSystemBoundary({
+  Future<TrackingBoundaryResult> applyBoundary({
     required ActivitySource source,
     required DateTime occurredAtUtc,
+    required bool cleanShutdown,
   }) {
     return _systemBoundaryOperation((transaction, nowUtc) async {
       final session = await _loadTrackingSession(transaction);
-      final transition = session.stopTask(
-        nowUtc: occurredAtUtc.toUtc(),
-        source: source,
-        createdAtUtc: nowUtc,
-      );
+      final transition = cleanShutdown
+          ? session.exitRequested(nowUtc: nowUtc, occurredAtUtc: occurredAtUtc)
+          : session.stopTask(
+              nowUtc: occurredAtUtc.toUtc(),
+              source: source,
+              createdAtUtc: nowUtc,
+            );
       await _applyTransition(transaction, transition);
-      return SystemBoundaryResult(
+      return TrackingBoundaryResult(
         didStopActiveTask: transition.eventToAppend != null,
         activeTask: transition.eventToAppend == null
             ? session.timeline.activeTask
@@ -116,26 +119,6 @@ final class TrackerService {
         transaction,
       )).exitRequested(nowUtc: nowUtc, occurredAtUtc: occurredAtUtc);
       await _applyTransition(transaction, transition);
-    });
-  }
-
-  Future<SystemBoundaryResult> prepareForSystemShutdown({
-    required DateTime occurredAtUtc,
-  }) {
-    return _systemBoundaryOperation((transaction, nowUtc) async {
-      final session = await _loadTrackingSession(transaction);
-      final transition = session.exitRequested(
-        nowUtc: nowUtc,
-        occurredAtUtc: occurredAtUtc,
-      );
-      await _applyTransition(transaction, transition);
-      return SystemBoundaryResult(
-        didStopActiveTask: transition.eventToAppend != null,
-        activeTask: transition.eventToAppend == null
-            ? session.timeline.activeTask
-            : null,
-        runtimeState: transition.runtimeState,
-      );
     });
   }
 
@@ -251,8 +234,8 @@ final class TrackerService {
     });
   }
 
-  Future<SystemBoundaryResult> _systemBoundaryOperation(
-    Future<SystemBoundaryResult> Function(
+  Future<TrackingBoundaryResult> _systemBoundaryOperation(
+    Future<TrackingBoundaryResult> Function(
       AppTransaction transaction,
       DateTime nowUtc,
     )

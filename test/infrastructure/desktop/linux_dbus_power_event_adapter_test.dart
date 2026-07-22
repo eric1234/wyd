@@ -14,7 +14,7 @@ void main() {
         LinuxDbusPowerEventAdapter.eventFromSignalValues(source, const [
           DBusBoolean(true),
         ]),
-        PowerEvent.sleep,
+        LifecycleEventKind.sleep,
       );
       expect(
         LinuxDbusPowerEventAdapter.eventFromSignalValues(source, const [
@@ -31,7 +31,7 @@ void main() {
         LinuxDbusPowerEventAdapter.eventFromSignalValues(source, const [
           DBusBoolean(true),
         ]),
-        PowerEvent.lock,
+        LifecycleEventKind.lock,
       );
       expect(
         LinuxDbusPowerEventAdapter.eventFromSignalValues(source, const [
@@ -230,16 +230,18 @@ void main() {
       expect(adapter, isNotNull);
       expect(adapter!.sources, [sleepSource, lockSource]);
 
-      final events = <PowerEvent>[];
-      final subscription = adapter.events.listen(events.add);
+      final events = <LifecycleEventKind>[];
+      await adapter.initialize((occurrence) async {
+        events.add(occurrence.kind);
+      });
       await Future<void>.delayed(Duration.zero);
       controllers[sleepSource]!.add(const [DBusBoolean(true)]);
       controllers[lockSource]!.add(const [DBusBoolean(true)]);
       await Future<void>.delayed(Duration.zero);
 
-      expect(events, [PowerEvent.sleep, PowerEvent.lock]);
+      expect(events, [LifecycleEventKind.sleep, LifecycleEventKind.lock]);
 
-      await subscription.cancel();
+      await adapter.dispose();
       await closed.future.timeout(const Duration(seconds: 1));
       expect(closeRequests, 1);
     });
@@ -258,6 +260,34 @@ void main() {
 
       expect(adapter, isNull);
       expect(closeRequests, 1);
+    });
+
+    test('logs malformed signals and callback failures', () async {
+      final source = _sleepSource();
+      final controller = StreamController<List<DBusValue>>.broadcast();
+      final logger = _CapturingDiagnosticLogger();
+      final adapter = await LinuxDbusPowerEventAdapter.create(
+        sources: [source],
+        probeSource: (_) async => true,
+        signalValueStreamFactory: (_) => controller.stream,
+        logger: logger,
+      );
+      addTearDown(() async {
+        await adapter?.dispose();
+        await controller.close();
+      });
+      await adapter!.initialize((_) async {
+        throw StateError('persistence failed');
+      });
+
+      controller.add(const [DBusString('invalid')]);
+      controller.add(const [DBusBoolean(true)]);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(logger.errors, hasLength(2));
+      expect(logger.errors[0].message, contains('decoding failed'));
+      expect(logger.errors[1].message, contains('callback failed'));
     });
   });
 }

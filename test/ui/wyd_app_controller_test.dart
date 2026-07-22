@@ -534,22 +534,22 @@ void main() {
     test(
       'initializes acknowledged power adapter without subscribing to stream',
       () async {
-        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-        final harness = await _Harness.create(powerEventAdapter: powerEvents);
+        final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+        final harness = await _Harness.create(
+          lifecycleEventAdapter: powerEvents,
+        );
         addTearDown(harness.dispose);
 
         await harness.controller.initialize();
 
         expect(powerEvents.initialized, isTrue);
-        expect(powerEvents.eventsAccessed, isFalse);
       },
     );
 
     test('disposes shared platform power and lifecycle adapter once', () async {
       final platformAdapter = _FakeSharedPlatformAdapter();
       final harness = await _Harness.create(
-        powerEventAdapter: platformAdapter,
-        nativeLifecycleAdapter: platformAdapter,
+        lifecycleEventAdapter: platformAdapter,
       );
       addTearDown(() async {
         await harness.tray.dispose();
@@ -602,7 +602,12 @@ void main() {
         await harness.controller.quickEntry.updateText('Write docs');
         await harness.controller.quickEntry.submit();
 
-        await harness.controller.handlePowerEvent(PowerEvent.lock);
+        await harness.lifecycleCoordinator.handle(
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.lock,
+            occurredAtUtc: harness.clock.current,
+          ),
+        );
 
         final events = await harness.activityLog.allEvents();
         expect(events.last.eventType, ActivityEventType.stopTask);
@@ -635,7 +640,12 @@ void main() {
       await harness.controller.openQuickEntry();
       harness.window.closedRoles.clear();
 
-      await harness.controller.handlePowerEvent(PowerEvent.sleep);
+      await harness.lifecycleCoordinator.handle(
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.sleep,
+          occurredAtUtc: harness.clock.current,
+        ),
+      );
 
       final events = await harness.activityLog.allEvents();
       expect(events.last.source, ActivitySource.systemSleep);
@@ -650,8 +660,10 @@ void main() {
     test(
       'acknowledged sleep persists system stop at supplied timestamp',
       () async {
-        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-        final harness = await _Harness.create(powerEventAdapter: powerEvents);
+        final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+        final harness = await _Harness.create(
+          lifecycleEventAdapter: powerEvents,
+        );
         addTearDown(harness.dispose);
         await harness.controller.initialize();
         await harness.controller.openQuickEntry();
@@ -661,7 +673,10 @@ void main() {
         final sleepAt = DateTime.utc(2026, 1, 1, 9, 30);
 
         await powerEvents.emit(
-          PowerEventOccurrence(event: PowerEvent.sleep, occurredAtUtc: sleepAt),
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.sleep,
+            occurredAtUtc: sleepAt,
+          ),
         );
         await _waitUntil(() => harness.controller.snapshot?.activeTask == null);
 
@@ -675,8 +690,8 @@ void main() {
     );
 
     test('acknowledged stop does not wait for tray refresh', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+      final harness = await _Harness.create(lifecycleEventAdapter: powerEvents);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
       await harness.controller.quickEntry.updateText('Write docs');
@@ -686,8 +701,8 @@ void main() {
 
       final acknowledgement = powerEvents
           .emit(
-            PowerEventOccurrence(
-              event: PowerEvent.lock,
+            LifecycleEventOccurrence(
+              kind: LifecycleEventKind.lock,
               occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
             ),
           )
@@ -707,29 +722,29 @@ void main() {
     });
 
     test('rapid lock shutdown cancellation preserves pending prompt', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+      final harness = await _Harness.create(lifecycleEventAdapter: powerEvents);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
       await harness.controller.quickEntry.updateText('Write docs');
       await harness.controller.quickEntry.submit();
 
       final lock = powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.lock,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.lock,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
         ),
       );
       final shutdown = powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdown,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdown,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
         ),
       );
       await Future.wait([lock, shutdown]);
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdownCancelled,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdownCancelled,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 32),
         ),
       );
@@ -747,8 +762,8 @@ void main() {
     });
 
     test('shutdown supersedes an in-flight deferred stop prompt', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+      final harness = await _Harness.create(lifecycleEventAdapter: powerEvents);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
       await harness.controller.quickEntry.updateText('Write docs');
@@ -756,15 +771,15 @@ void main() {
       harness.window.blockOpening();
 
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.lock,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.lock,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
         ),
       );
       await _waitUntil(() => harness.window.blockedOpenStarted);
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdown,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdown,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
         ),
       );
@@ -776,10 +791,10 @@ void main() {
     });
 
     test('power and native termination preparations are serialized', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
       final harness = await _Harness.create(
         withNativeLifecycle: true,
-        powerEventAdapter: powerEvents,
+        lifecycleEventAdapter: powerEvents,
       );
       addTearDown(harness.dispose);
       await harness.controller.initialize();
@@ -787,13 +802,16 @@ void main() {
       await harness.controller.quickEntry.submit();
 
       final lock = powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.lock,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.lock,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
         ),
       );
-      final termination = harness.nativeLifecycle.prepareTermination(
-        DateTime.utc(2026, 1, 1, 9, 31),
+      final termination = harness.lifecycleCoordinator.handle(
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.termination,
+          occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
+        ),
       );
       await Future.wait([lock, termination]);
 
@@ -810,7 +828,7 @@ void main() {
     test('early native termination suppresses startup windows', () async {
       final terminationAt = DateTime.utc(2026, 1, 1, 8, 59);
       final harness = await _Harness.create(
-        nativeLifecycleAdapter: _ImmediateNativeLifecycleAdapter(terminationAt),
+        lifecycleEventAdapter: _ImmediateLifecycleEventAdapter(terminationAt),
       );
       addTearDown(harness.dispose);
 
@@ -826,10 +844,10 @@ void main() {
     test(
       'acknowledged shutdown prepares clean state without exiting',
       () async {
-        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
+        final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
         final harness = await _Harness.create(
           withScheduler: true,
-          powerEventAdapter: powerEvents,
+          lifecycleEventAdapter: powerEvents,
         );
         addTearDown(harness.dispose);
         await harness.controller.initialize();
@@ -841,8 +859,8 @@ void main() {
         final shutdownAt = DateTime.utc(2026, 1, 1, 9, 30);
 
         await powerEvents.emit(
-          PowerEventOccurrence(
-            event: PowerEvent.shutdown,
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.shutdown,
             occurredAtUtc: shutdownAt,
           ),
         );
@@ -867,8 +885,8 @@ void main() {
     );
 
     test('cancelled shutdown reopens prompt after stopping task', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+      final harness = await _Harness.create(lifecycleEventAdapter: powerEvents);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
       await harness.controller.openQuickEntry();
@@ -876,8 +894,8 @@ void main() {
       await harness.controller.quickEntry.submit();
 
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdown,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdown,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
         ),
       );
@@ -890,8 +908,8 @@ void main() {
       harness.window.focusedRoles.clear();
 
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdownCancelled,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdownCancelled,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
         ),
       );
@@ -912,14 +930,14 @@ void main() {
     });
 
     test('shutdown while idle marks clean shutdown without exit', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+      final harness = await _Harness.create(lifecycleEventAdapter: powerEvents);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
 
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdown,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdown,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
         ),
       );
@@ -937,14 +955,14 @@ void main() {
     });
 
     test('cancelled idle shutdown does not open prompt', () async {
-      final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
+      final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+      final harness = await _Harness.create(lifecycleEventAdapter: powerEvents);
       addTearDown(harness.dispose);
       await harness.controller.initialize();
 
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdown,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdown,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
         ),
       );
@@ -957,8 +975,8 @@ void main() {
       harness.window.focusedRoles.clear();
 
       await powerEvents.emit(
-        PowerEventOccurrence(
-          event: PowerEvent.shutdownCancelled,
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.shutdownCancelled,
           occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
         ),
       );
@@ -982,7 +1000,12 @@ void main() {
         await harness.controller.quickEntry.updateText('Write docs');
         await harness.controller.quickEntry.submit();
 
-        await harness.controller.handlePowerEvent(PowerEvent.lock);
+        await harness.lifecycleCoordinator.handle(
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.lock,
+            occurredAtUtc: harness.clock.current,
+          ),
+        );
         await harness.controller.quickEntry.submit();
 
         final events = await harness.activityLog.allEvents();
@@ -1040,7 +1063,12 @@ void main() {
         harness.window.openedRoles.clear();
         harness.window.focusedRoles.clear();
 
-        await harness.controller.handlePowerEvent(PowerEvent.lock);
+        await harness.lifecycleCoordinator.handle(
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.lock,
+            occurredAtUtc: harness.clock.current,
+          ),
+        );
 
         expect(await harness.activityLog.allEvents(), isEmpty);
         expect(harness.controller.activeRole, isNull);
@@ -1064,8 +1092,18 @@ void main() {
       await harness.controller.quickEntry.updateText('Write docs');
       await harness.controller.quickEntry.submit();
 
-      await harness.controller.handlePowerEvent(PowerEvent.lock);
-      await harness.controller.handlePowerEvent(PowerEvent.sleep);
+      await harness.lifecycleCoordinator.handle(
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.lock,
+          occurredAtUtc: harness.clock.current,
+        ),
+      );
+      await harness.lifecycleCoordinator.handle(
+        LifecycleEventOccurrence(
+          kind: LifecycleEventKind.sleep,
+          occurredAtUtc: harness.clock.current,
+        ),
+      );
 
       final events = await harness.activityLog.allEvents();
       expect(events.map((event) => event.eventType), [
@@ -1079,8 +1117,10 @@ void main() {
     test(
       'duplicate acknowledged events do not append duplicate stops',
       () async {
-        final powerEvents = _FakeAcknowledgedPowerEventAdapter();
-        final harness = await _Harness.create(powerEventAdapter: powerEvents);
+        final powerEvents = _FakeAcknowledgedLifecycleEventAdapter();
+        final harness = await _Harness.create(
+          lifecycleEventAdapter: powerEvents,
+        );
         addTearDown(harness.dispose);
         await harness.controller.initialize();
         await harness.controller.openQuickEntry();
@@ -1088,14 +1128,14 @@ void main() {
         await harness.controller.quickEntry.submit();
 
         await powerEvents.emit(
-          PowerEventOccurrence(
-            event: PowerEvent.lock,
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.lock,
             occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 30),
           ),
         );
         await powerEvents.emit(
-          PowerEventOccurrence(
-            event: PowerEvent.sleep,
+          LifecycleEventOccurrence(
+            kind: LifecycleEventKind.sleep,
             occurredAtUtc: DateTime.utc(2026, 1, 1, 9, 31),
           ),
         );
@@ -1108,25 +1148,6 @@ void main() {
         expect(events.last.source, ActivitySource.systemLock);
       },
     );
-
-    test('power event stream errors surface as runtime errors', () async {
-      final powerEvents = _FakePowerEventAdapter();
-      addTearDown(powerEvents.dispose);
-      final harness = await _Harness.create(powerEventAdapter: powerEvents);
-      addTearDown(harness.dispose);
-      await harness.controller.initialize();
-
-      powerEvents.emitError(StateError('power stream failed'));
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-
-      expect(
-        harness.controller.runtimeErrorMessage,
-        contains('power stream failed'),
-      );
-      expect(harness.window.resizedConfigurations.last.title, 'wyd error');
-      expect(harness.window.focusedRoles.last, WindowRole.quickEntry);
-    });
   });
 }
 
@@ -1152,6 +1173,7 @@ final class _Harness {
     required this.timers,
     required this.singleInstance,
     required this.nativeLifecycle,
+    required this.lifecycleCoordinator,
     required this.controller,
     required this.exitRequests,
     required this.hideResidentWindowRequests,
@@ -1166,7 +1188,8 @@ final class _Harness {
   final _FakeClock clock;
   final _FakeSchedulerTimerFactory timers;
   final _FakeSingleInstanceAdapter singleInstance;
-  final _FakeNativeLifecycleAdapter nativeLifecycle;
+  final _FakeLifecycleEventAdapter nativeLifecycle;
+  final LifecycleCoordinator lifecycleCoordinator;
   final WydAppController controller;
   final int Function() exitRequests;
   final int Function() hideResidentWindowRequests;
@@ -1178,8 +1201,7 @@ final class _Harness {
     bool trayFailsOnInitialize = false,
     bool exitFails = false,
     Duration? secondaryWindowWarmUpDelay,
-    PowerEventAdapter powerEventAdapter = const UnsupportedPowerEventAdapter(),
-    NativeLifecycleAdapter? nativeLifecycleAdapter,
+    LifecycleEventAdapter? lifecycleEventAdapter,
   }) async {
     final database = await AppDatabase.openInMemory(
       databaseFactory: databaseFactoryFfi,
@@ -1193,7 +1215,8 @@ final class _Harness {
     final window = _FakeWindowAdapter();
     final timers = _FakeSchedulerTimerFactory();
     final singleInstance = _FakeSingleInstanceAdapter();
-    final nativeLifecycle = _FakeNativeLifecycleAdapter();
+    final nativeLifecycle = _FakeLifecycleEventAdapter();
+    final lifecycleCoordinator = LifecycleCoordinator(trackerService: service);
     var exitRequests = 0;
     var hideResidentWindowRequests = 0;
     late final WydAppController controller;
@@ -1214,10 +1237,12 @@ final class _Harness {
       windowCoordinator: WindowCoordinator(window),
       nagScheduler: scheduler,
       singleInstanceAdapter: withSingleInstance ? singleInstance : null,
-      nativeLifecycleAdapter:
-          nativeLifecycleAdapter ??
-          (withNativeLifecycle ? nativeLifecycle : null),
-      powerEventAdapter: powerEventAdapter,
+      lifecycleCoordinator: lifecycleCoordinator,
+      lifecycleEventAdapter:
+          lifecycleEventAdapter ??
+          (withNativeLifecycle
+              ? nativeLifecycle
+              : const UnsupportedLifecycleEventAdapter()),
       secondaryWindowWarmUpDelay: secondaryWindowWarmUpDelay,
       hideResidentWindow: () async {
         hideResidentWindowRequests += 1;
@@ -1241,6 +1266,7 @@ final class _Harness {
       timers: timers,
       singleInstance: singleInstance,
       nativeLifecycle: nativeLifecycle,
+      lifecycleCoordinator: lifecycleCoordinator,
       controller: controller,
       exitRequests: () => exitRequests,
       hideResidentWindowRequests: () => hideResidentWindowRequests,
@@ -1255,43 +1281,20 @@ final class _Harness {
   }
 }
 
-final class _FakePowerEventAdapter implements PowerEventAdapter {
-  final StreamController<PowerEvent> _events =
-      StreamController<PowerEvent>.broadcast();
-
-  @override
-  Stream<PowerEvent> get events => _events.stream;
-
-  void emitError(Object error) {
-    _events.addError(error, StackTrace.current);
-  }
-
-  Future<void> dispose() async {
-    await _events.close();
-  }
-}
-
-final class _FakeAcknowledgedPowerEventAdapter
-    implements AcknowledgedPowerEventAdapter {
+final class _FakeAcknowledgedLifecycleEventAdapter
+    implements LifecycleEventAdapter {
   bool initialized = false;
-  bool eventsAccessed = false;
-  Future<void> Function(PowerEventOccurrence occurrence)? _onPowerEvent;
+  Future<void> Function(LifecycleEventOccurrence occurrence)? _onPowerEvent;
 
   @override
-  Stream<PowerEvent> get events {
-    eventsAccessed = true;
-    return const Stream.empty();
-  }
-
-  @override
-  Future<void> initializeAcknowledged(
-    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onPowerEvent,
   ) async {
     initialized = true;
     _onPowerEvent = onPowerEvent;
   }
 
-  Future<void> emit(PowerEventOccurrence occurrence) async {
+  Future<void> emit(LifecycleEventOccurrence occurrence) async {
     final onPowerEvent = _onPowerEvent;
     if (onPowerEvent == null) {
       throw StateError('Acknowledged power adapter is not initialized.');
@@ -1301,31 +1304,19 @@ final class _FakeAcknowledgedPowerEventAdapter
 }
 
 final class _FakeSharedPlatformAdapter
-    implements
-        AcknowledgedPowerEventAdapter,
-        NativeLifecycleAdapter,
-        DisposablePlatformAdapter {
+    implements LifecycleEventAdapter, DisposablePlatformAdapter {
   bool powerInitialized = false;
   bool lifecycleInitialized = false;
   bool _disposed = false;
   var disposeRequests = 0;
 
   @override
-  Stream<PowerEvent> get events => const Stream.empty();
-
-  @override
   Future<void> initialize(
-    Future<void> Function(NativeTerminationOccurrence occurrence)
+    Future<void> Function(LifecycleEventOccurrence occurrence)
     onTerminationRequested,
   ) async {
-    lifecycleInitialized = true;
-  }
-
-  @override
-  Future<void> initializeAcknowledged(
-    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
-  ) async {
     powerInitialized = true;
+    lifecycleInitialized = true;
   }
 
   @override
@@ -1353,13 +1344,13 @@ final class _FakeSingleInstanceAdapter implements SingleInstanceAdapter {
   }
 }
 
-final class _FakeNativeLifecycleAdapter implements NativeLifecycleAdapter {
-  Future<void> Function(NativeTerminationOccurrence occurrence)?
+final class _FakeLifecycleEventAdapter implements LifecycleEventAdapter {
+  Future<void> Function(LifecycleEventOccurrence occurrence)?
   _onTerminationRequested;
 
   @override
   Future<void> initialize(
-    Future<void> Function(NativeTerminationOccurrence occurrence)
+    Future<void> Function(LifecycleEventOccurrence occurrence)
     onTerminationRequested,
   ) async {
     _onTerminationRequested = onTerminationRequested;
@@ -1367,23 +1358,29 @@ final class _FakeNativeLifecycleAdapter implements NativeLifecycleAdapter {
 
   Future<void> prepareTermination(DateTime occurredAtUtc) async {
     await _onTerminationRequested?.call(
-      NativeTerminationOccurrence(occurredAtUtc: occurredAtUtc),
+      LifecycleEventOccurrence(
+        kind: LifecycleEventKind.termination,
+        occurredAtUtc: occurredAtUtc,
+      ),
     );
   }
 }
 
-final class _ImmediateNativeLifecycleAdapter implements NativeLifecycleAdapter {
-  const _ImmediateNativeLifecycleAdapter(this.occurredAtUtc);
+final class _ImmediateLifecycleEventAdapter implements LifecycleEventAdapter {
+  const _ImmediateLifecycleEventAdapter(this.occurredAtUtc);
 
   final DateTime occurredAtUtc;
 
   @override
   Future<void> initialize(
-    Future<void> Function(NativeTerminationOccurrence occurrence)
+    Future<void> Function(LifecycleEventOccurrence occurrence)
     onTerminationRequested,
   ) {
     return onTerminationRequested(
-      NativeTerminationOccurrence(occurredAtUtc: occurredAtUtc),
+      LifecycleEventOccurrence(
+        kind: LifecycleEventKind.termination,
+        occurredAtUtc: occurredAtUtc,
+      ),
     );
   }
 }

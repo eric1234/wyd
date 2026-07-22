@@ -1,6 +1,7 @@
 export 'app_state_snapshot.dart';
 export 'clock.dart';
 export 'diagnostic_logger.dart';
+export 'lifecycle_coordinator.dart';
 export 'nag_scheduler.dart';
 export 'platform_adapters.dart';
 export 'report_service.dart';

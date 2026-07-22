@@ -5,8 +5,7 @@ import 'gnome_idle_user_idle_detector.dart';
 import 'launch_at_startup_adapter.dart';
 import 'linux_dbus_power_event_adapter.dart';
 import 'linux_logind_lifecycle_power_adapter.dart';
-import 'method_channel_acknowledged_power_event_adapter.dart';
-import 'method_channel_native_lifecycle_adapter.dart';
+import 'method_channel_lifecycle_event_adapter.dart';
 import 'screen_saver_idle_user_idle_detector.dart';
 import 'system_idle_user_idle_detector.dart';
 
@@ -14,9 +13,8 @@ final class DesktopPlatformBindings {
   const DesktopPlatformBindings({
     required this.capabilities,
     required this.startupAtLoginAdapter,
-    required this.powerEventAdapter,
+    required this.lifecycleEventAdapter,
     required this.userIdleDetector,
-    required this.nativeLifecycleAdapter,
   });
 
   static Future<DesktopPlatformBindings> current({
@@ -48,9 +46,9 @@ final class DesktopPlatformBindings {
       }
     }
 
-    PowerEventAdapter? linuxPowerEventAdapter;
+    LifecycleEventAdapter? linuxLifecycleEventAdapter;
     if (includePowerLifecycleAdapters && Platform.isLinux) {
-      linuxPowerEventAdapter =
+      linuxLifecycleEventAdapter =
           await LinuxLogindLifecyclePowerAdapter.create(logger: logger) ??
           await LinuxDbusPowerEventAdapter.create(logger: logger);
     }
@@ -59,9 +57,9 @@ final class DesktopPlatformBindings {
       isLinux: Platform.isLinux,
       isMacOS: Platform.isMacOS,
       isWindows: Platform.isWindows,
-      linuxPowerEventAdapterFactory: linuxPowerEventAdapter == null
+      linuxLifecycleEventAdapterFactory: linuxLifecycleEventAdapter == null
           ? null
-          : () => linuxPowerEventAdapter,
+          : () => linuxLifecycleEventAdapter,
       includePowerLifecycleAdapters: includePowerLifecycleAdapters,
       supportsUserIdleDetection: userIdleDetector != null,
       userIdleDetector: userIdleDetector ?? const UnsupportedUserIdleDetector(),
@@ -75,8 +73,8 @@ final class DesktopPlatformBindings {
     StartupAtLoginAdapter Function()? linuxStartupAtLoginFactory,
     StartupAtLoginAdapter Function()? macOSStartupAtLoginFactory,
     StartupAtLoginAdapter Function()? windowsStartupAtLoginFactory,
-    PowerEventAdapter? Function()? linuxPowerEventAdapterFactory,
-    PowerEventAdapter? Function()? macOSPowerEventAdapterFactory,
+    LifecycleEventAdapter? Function()? linuxLifecycleEventAdapterFactory,
+    LifecycleEventAdapter? Function()? macOSLifecycleEventAdapterFactory,
     bool includePowerLifecycleAdapters = true,
     bool supportsUserIdleDetection = false,
     UserIdleDetector userIdleDetector = const UnsupportedUserIdleDetector(),
@@ -90,43 +88,37 @@ final class DesktopPlatformBindings {
       macOSStartupAtLoginFactory: macOSStartupAtLoginFactory,
       windowsStartupAtLoginFactory: windowsStartupAtLoginFactory,
     );
-    final powerEventAdapter = includePowerLifecycleAdapters
-        ? _powerEventAdapterForPlatform(
+    final lifecycleEventAdapter = includePowerLifecycleAdapters
+        ? _lifecycleEventAdapterForPlatform(
             isLinux: isLinux,
             isMacOS: isMacOS,
             isWindows: isWindows,
-            linuxPowerEventAdapterFactory: linuxPowerEventAdapterFactory,
-            macOSPowerEventAdapterFactory: macOSPowerEventAdapterFactory,
+            linuxLifecycleEventAdapterFactory:
+                linuxLifecycleEventAdapterFactory,
+            macOSLifecycleEventAdapterFactory:
+                macOSLifecycleEventAdapterFactory,
           )
-        : const UnsupportedPowerEventAdapter();
+        : const UnsupportedLifecycleEventAdapter();
     return DesktopPlatformBindings(
       capabilities: PlatformCapabilities(
         supportsUserIdleDetection: supportsUserIdleDetection,
         supportsStartAtLogin:
             startupAtLoginAdapter is! UnsupportedStartupAtLoginAdapter,
-        supportsPowerEvents: powerEventAdapter is! UnsupportedPowerEventAdapter,
+        supportsPowerEvents:
+            lifecycleEventAdapter is! UnsupportedLifecycleEventAdapter,
         supportsTrayClickActions:
             supportsTrayClickActions ?? (isMacOS || isWindows),
       ),
       startupAtLoginAdapter: startupAtLoginAdapter,
-      powerEventAdapter: powerEventAdapter,
+      lifecycleEventAdapter: lifecycleEventAdapter,
       userIdleDetector: userIdleDetector,
-      nativeLifecycleAdapter: includePowerLifecycleAdapters
-          ? _nativeLifecycleAdapterForPlatform(
-              isLinux: isLinux,
-              isMacOS: isMacOS,
-              isWindows: isWindows,
-              powerEventAdapter: powerEventAdapter,
-            )
-          : const UnsupportedNativeLifecycleAdapter(),
     );
   }
 
   final PlatformCapabilities capabilities;
   final StartupAtLoginAdapter startupAtLoginAdapter;
-  final PowerEventAdapter powerEventAdapter;
+  final LifecycleEventAdapter lifecycleEventAdapter;
   final UserIdleDetector userIdleDetector;
-  final NativeLifecycleAdapter nativeLifecycleAdapter;
 
   static StartupAtLoginAdapter _startupAtLoginAdapterForPlatform({
     required bool isLinux,
@@ -151,54 +143,40 @@ final class DesktopPlatformBindings {
     return const UnsupportedStartupAtLoginAdapter();
   }
 
-  static PowerEventAdapter _powerEventAdapterForPlatform({
+  static LifecycleEventAdapter _lifecycleEventAdapterForPlatform({
     required bool isLinux,
     required bool isMacOS,
     required bool isWindows,
-    PowerEventAdapter? Function()? linuxPowerEventAdapterFactory,
-    PowerEventAdapter? Function()? macOSPowerEventAdapterFactory,
+    LifecycleEventAdapter? Function()? linuxLifecycleEventAdapterFactory,
+    LifecycleEventAdapter? Function()? macOSLifecycleEventAdapterFactory,
   }) {
     if (isLinux) {
-      return _powerEventAdapterFromFactory(linuxPowerEventAdapterFactory);
+      return _lifecycleEventAdapterFromFactory(
+        linuxLifecycleEventAdapterFactory,
+      );
     }
     if (isMacOS) {
-      return _powerEventAdapterFromFactory(
-        macOSPowerEventAdapterFactory ??
-            () => const MethodChannelAcknowledgedPowerEventAdapter(),
+      return _lifecycleEventAdapterFromFactory(
+        macOSLifecycleEventAdapterFactory ??
+            () => const MethodChannelLifecycleEventAdapter(),
       );
     }
     if (isWindows) {
-      return const MethodChannelAcknowledgedPowerEventAdapter();
+      return const MethodChannelLifecycleEventAdapter();
     }
-    return const UnsupportedPowerEventAdapter();
+    return const UnsupportedLifecycleEventAdapter();
   }
 
-  static PowerEventAdapter _powerEventAdapterFromFactory(
-    PowerEventAdapter? Function()? factory,
+  static LifecycleEventAdapter _lifecycleEventAdapterFromFactory(
+    LifecycleEventAdapter? Function()? factory,
   ) {
     if (factory == null) {
-      return const UnsupportedPowerEventAdapter();
+      return const UnsupportedLifecycleEventAdapter();
     }
     try {
-      return factory() ?? const UnsupportedPowerEventAdapter();
+      return factory() ?? const UnsupportedLifecycleEventAdapter();
     } catch (_) {
-      return const UnsupportedPowerEventAdapter();
+      return const UnsupportedLifecycleEventAdapter();
     }
-  }
-
-  static NativeLifecycleAdapter _nativeLifecycleAdapterForPlatform({
-    required bool isLinux,
-    required bool isMacOS,
-    required bool isWindows,
-    required PowerEventAdapter powerEventAdapter,
-  }) {
-    final adapter = powerEventAdapter;
-    if (isLinux && adapter is NativeLifecycleAdapter) {
-      return adapter as NativeLifecycleAdapter;
-    }
-    if (isMacOS || isWindows) {
-      return MethodChannelNativeLifecycleAdapter();
-    }
-    return const UnsupportedNativeLifecycleAdapter();
   }
 }

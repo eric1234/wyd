@@ -21,11 +21,9 @@ namespace {
 constexpr DWORD kLifecycleAcknowledgementTimeoutMs = 4000;
 constexpr DWORD kPowerEventAcknowledgementTimeoutMs = 1800;
 constexpr UINT kDrainNativeEventsMessage = WM_APP + 0x37;
-constexpr UINT kRetrySessionNotificationMessage = WM_APP + 0x38;
 constexpr UINT_PTR kSessionNotificationRetryTimerId = 0x57594401;
 constexpr UINT kSessionNotificationRetryIntervalMs = 1000;
-constexpr wchar_t kTerminalServicesReadyEventName[] =
-    L"Global\\TermSrvReadyEvent";
+constexpr unsigned int kSessionNotificationRetryLimit = 10;
 
 std::atomic<UINT_PTR> g_next_callback_generation{1};
 
@@ -90,15 +88,12 @@ bool FlutterWindow::OnCreate() {
 
   tearing_down_ = false;
   callback_generation_ = g_next_callback_generation.fetch_add(1);
-  callback_context_ = std::make_shared<CallbackContext>();
-  callback_context_->window = GetHandle();
-  callback_context_->generation = callback_generation_;
-  callback_context_->valid = true;
+  drain_target_ =
+      std::make_shared<DrainTarget>(GetHandle(), callback_generation_);
 
   RegisterPlugins(flutter_controller_->engine());
   ConfigureSingleInstanceChannel();
-  ConfigureLifecycleChannel();
-  ConfigureAcknowledgedPowerEventChannel();
+  ConfigureLifecycleEventsChannel();
   RegisterSessionNotifications();
   DesktopMultiWindowSetWindowCreatedCallback([](void* controller) {
     auto* flutter_view_controller =
@@ -127,25 +122,17 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   tearing_down_ = true;
-  if (callback_context_) {
-    AcquireSRWLockExclusive(&callback_context_->lock);
-    callback_context_->valid = false;
-    callback_context_->window = nullptr;
-    ReleaseSRWLockExclusive(&callback_context_->lock);
+  if (drain_target_) {
+    drain_target_->window.store(nullptr);
   }
   callback_generation_ = 0;
 
   UnregisterSessionNotifications();
   native_events_.clear();
-  power_events_ready_ = false;
-  if (acknowledged_power_event_channel_) {
-    acknowledged_power_event_channel_->SetMethodCallHandler(nullptr);
-    acknowledged_power_event_channel_.reset();
-  }
-  lifecycle_ready_ = false;
-  if (lifecycle_channel_) {
-    lifecycle_channel_->SetMethodCallHandler(nullptr);
-    lifecycle_channel_.reset();
+  lifecycle_events_ready_ = false;
+  if (lifecycle_events_channel_) {
+    lifecycle_events_channel_->SetMethodCallHandler(nullptr);
+    lifecycle_events_channel_.reset();
   }
   if (single_instance_channel_) {
     single_instance_channel_->SetMethodCallHandler(nullptr);
@@ -155,8 +142,7 @@ void FlutterWindow::OnDestroy() {
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
-  callback_context_.reset();
-
+  drain_target_.reset();
   Win32Window::OnDestroy();
 }
 
@@ -183,16 +169,15 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
           DrainNativeEvents();
         }
         return 0;
-      case kRetrySessionNotificationMessage:
-        if (wparam == callback_generation_ && !tearing_down_) {
-          terminal_services_ready_event_observed_ = true;
-          CancelSessionNotificationRegistrationRetry();
-          TryRegisterSessionNotifications();
-        }
-        return 0;
       case WM_TIMER:
         if (session_notification_retry_timer_id_ != 0 &&
             wparam == session_notification_retry_timer_id_) {
+          if (KillTimer(session_notification_window_,
+                        session_notification_retry_timer_id_) == FALSE) {
+            LogWindowsError("KillTimer(session notification retry)",
+                            GetLastError());
+          }
+          session_notification_retry_timer_id_ = 0;
           TryRegisterSessionNotifications();
           return 0;
         }
@@ -253,7 +238,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         }
         break;
       case kDrainNativeEventsMessage:
-      case kRetrySessionNotificationMessage:
         return 0;
       case WM_TIMER:
         if (session_notification_retry_timer_id_ != 0 &&
@@ -289,39 +273,18 @@ void FlutterWindow::ConfigureSingleInstanceChannel() {
       });
 }
 
-void FlutterWindow::ConfigureLifecycleChannel() {
+void FlutterWindow::ConfigureLifecycleEventsChannel() {
   auto* messenger = flutter_controller_->engine()->messenger();
-  lifecycle_channel_ =
+  lifecycle_events_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          messenger, "dev.wyd.tracker/lifecycle",
+          messenger, "dev.wyd.tracker/lifecycle_events",
           &flutter::StandardMethodCodec::GetInstance());
-  lifecycle_channel_->SetMethodCallHandler(
+  lifecycle_events_channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) {
-        if (call.method_name() == "lifecycleReady") {
-          lifecycle_ready_ = true;
-          result->Success();
-          PostNativeEventDrain();
-          return;
-        }
-
-        result->NotImplemented();
-      });
-}
-
-void FlutterWindow::ConfigureAcknowledgedPowerEventChannel() {
-  auto* messenger = flutter_controller_->engine()->messenger();
-  acknowledged_power_event_channel_ =
-      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          messenger, "dev.wyd.tracker/power_events_ack",
-          &flutter::StandardMethodCodec::GetInstance());
-  acknowledged_power_event_channel_->SetMethodCallHandler(
-      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
-             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
-                 result) {
-        if (call.method_name() == "powerEventsReady") {
-          power_events_ready_ = true;
+        if (call.method_name() == "lifecycleEventsReady") {
+          lifecycle_events_ready_ = true;
           result->Success();
           PostNativeEventDrain();
           return;
@@ -350,6 +313,7 @@ void FlutterWindow::TryRegisterSessionNotifications() {
   if (registered != FALSE) {
     session_notifications_registered_ = true;
     CancelSessionNotificationRegistrationRetry();
+    OutputDebugStringA("wyd: session notifications registered.\n");
     return;
   }
 
@@ -363,37 +327,16 @@ void FlutterWindow::TryRegisterSessionNotifications() {
 }
 
 void FlutterWindow::ScheduleSessionNotificationRegistrationRetry() {
-  if (tearing_down_ || terminal_services_ready_wait_ != nullptr ||
-      session_notification_retry_timer_id_ != 0 ||
+  if (tearing_down_ || session_notification_retry_timer_id_ != 0 ||
       session_notification_window_ == nullptr) {
     return;
   }
 
-  if (!terminal_services_ready_event_observed_) {
-    terminal_services_ready_event_ = OpenEventW(
-        SYNCHRONIZE, FALSE, kTerminalServicesReadyEventName);
-    const DWORD open_error = terminal_services_ready_event_ == nullptr
-                                 ? GetLastError()
-                                 : ERROR_SUCCESS;
-    if (terminal_services_ready_event_ != nullptr) {
-      HANDLE wait_handle = nullptr;
-      const BOOL wait_registered = RegisterWaitForSingleObject(
-          &wait_handle, terminal_services_ready_event_,
-          &FlutterWindow::OnTerminalServicesReady, callback_context_.get(),
-          INFINITE, WT_EXECUTEONLYONCE);
-      const DWORD wait_error =
-          wait_registered == FALSE ? GetLastError() : ERROR_SUCCESS;
-      if (wait_registered != FALSE) {
-        terminal_services_ready_wait_ = wait_handle;
-        return;
-      }
-
-      LogWindowsError("RegisterWaitForSingleObject", wait_error);
-      CloseHandle(terminal_services_ready_event_);
-      terminal_services_ready_event_ = nullptr;
-    } else {
-      LogWindowsError("OpenEventW(Global\\TermSrvReadyEvent)", open_error);
-    }
+  if (session_notification_retry_count_ >=
+      kSessionNotificationRetryLimit) {
+    OutputDebugStringA(
+        "wyd: session notification registration retries exhausted.\n");
+    return;
   }
 
   session_notification_retry_timer_id_ =
@@ -403,30 +346,21 @@ void FlutterWindow::ScheduleSessionNotificationRegistrationRetry() {
   if (session_notification_retry_timer_id_ == 0) {
     const DWORD error = GetLastError();
     LogWindowsError("SetTimer(session notification retry)", error);
+  } else {
+    ++session_notification_retry_count_;
+    OutputDebugStringA(
+        "wyd: session notification registration retry scheduled.\n");
   }
 }
 
 void FlutterWindow::CancelSessionNotificationRegistrationRetry() {
   if (session_notification_retry_timer_id_ != 0 &&
       session_notification_window_ != nullptr) {
-    KillTimer(session_notification_window_,
-              session_notification_retry_timer_id_);
-    session_notification_retry_timer_id_ = 0;
-  }
-
-  if (terminal_services_ready_wait_ != nullptr) {
-    const BOOL unregistered = UnregisterWaitEx(
-        terminal_services_ready_wait_, INVALID_HANDLE_VALUE);
-    const DWORD error = unregistered == FALSE ? GetLastError() : ERROR_SUCCESS;
-    if (unregistered == FALSE && error != ERROR_INVALID_HANDLE) {
-      LogWindowsError("UnregisterWaitEx", error);
+    if (KillTimer(session_notification_window_,
+                  session_notification_retry_timer_id_) == FALSE) {
+      LogWindowsError("KillTimer(session notification retry)", GetLastError());
     }
-    terminal_services_ready_wait_ = nullptr;
-  }
-
-  if (terminal_services_ready_event_ != nullptr) {
-    CloseHandle(terminal_services_ready_event_);
-    terminal_services_ready_event_ = nullptr;
+    session_notification_retry_timer_id_ = 0;
   }
 }
 
@@ -445,45 +379,7 @@ void FlutterWindow::UnregisterSessionNotifications() {
   }
 
   session_notification_window_ = nullptr;
-  terminal_services_ready_event_observed_ = false;
-}
-
-void CALLBACK FlutterWindow::OnTerminalServicesReady(void* context,
-                                                      BOOLEAN) {
-  auto* callback_context = static_cast<CallbackContext*>(context);
-  if (callback_context == nullptr) {
-    return;
-  }
-
-  AcquireSRWLockShared(&callback_context->lock);
-  const bool valid =
-      callback_context->valid && callback_context->window != nullptr;
-  const bool posted =
-      valid && PostMessage(callback_context->window,
-                           kRetrySessionNotificationMessage,
-                           callback_context->generation, 0) != FALSE;
-  ReleaseSRWLockShared(&callback_context->lock);
-  if (valid && !posted) {
-    OutputDebugStringA(
-        "wyd: terminal-services readiness retry could not be posted.\n");
-  }
-}
-
-bool FlutterWindow::PostCallbackMessage(
-    const std::shared_ptr<CallbackContext>& context,
-    UINT message,
-    UINT_PTR generation) noexcept {
-  if (!context) {
-    return false;
-  }
-
-  AcquireSRWLockShared(&context->lock);
-  const bool posted = context->valid && context->generation == generation &&
-                      context->window != nullptr &&
-                      PostMessage(context->window, message, generation, 0) !=
-                          FALSE;
-  ReleaseSRWLockShared(&context->lock);
-  return posted;
+  session_notification_retry_count_ = 0;
 }
 
 void FlutterWindow::NotifySecondInstanceActivated() {
@@ -504,7 +400,22 @@ void FlutterWindow::EnqueueNativeEventAndWait(NativeEventKind kind,
   auto event = std::make_shared<NativeEvent>(
       next_native_event_id_++, kind, CurrentUtcIso8601(),
       received_at + timeout_ms);
-  native_events_.push_back(event);
+  if (kind == NativeEventKind::kTermination) {
+    for (const auto& pending : native_events_) {
+      pending->waiter_active.store(false);
+      NativeEventState state = pending->state.load();
+      while (state == NativeEventState::kPending ||
+             state == NativeEventState::kAwaitingReply) {
+        if (pending->state.compare_exchange_weak(
+                state, NativeEventState::kWaitExpired)) {
+          break;
+        }
+      }
+    }
+    native_events_.push_front(event);
+  } else {
+    native_events_.push_back(event);
+  }
   PostNativeEventDrain();
   WaitForNativeEvent(event);
 }
@@ -526,26 +437,7 @@ void FlutterWindow::DrainNativeEvents() {
       return;
     }
 
-    const bool event_ready = event->kind == NativeEventKind::kTermination
-                                 ? lifecycle_ready_ && lifecycle_channel_
-                                 : power_events_ready_ &&
-                                       acknowledged_power_event_channel_;
-    if (!event_ready) {
-      if (event->kind != NativeEventKind::kTermination && lifecycle_ready_ &&
-          lifecycle_channel_) {
-        std::shared_ptr<NativeEvent> pending_termination;
-        for (const auto& candidate : native_events_) {
-          if (candidate->kind == NativeEventKind::kTermination &&
-              candidate->state.load() == NativeEventState::kPending) {
-            pending_termination = candidate;
-            break;
-          }
-        }
-        if (pending_termination) {
-          ExpireNativeEventsBefore(pending_termination);
-          continue;
-        }
-      }
+    if (!lifecycle_events_ready_ || !lifecycle_events_channel_) {
       return;
     }
 
@@ -557,35 +449,30 @@ void FlutterWindow::DrainNativeEvents() {
 
     try {
       flutter::EncodableMap arguments;
+      arguments[flutter::EncodableValue("kind")] = flutter::EncodableValue(
+          event->kind == NativeEventKind::kTermination
+              ? "termination"
+              : event->kind == NativeEventKind::kLock ? "lock" : "sleep");
       arguments[flutter::EncodableValue("occurredAtUtc")] =
           flutter::EncodableValue(event->occurred_at_utc);
 
-      flutter::MethodChannel<flutter::EncodableValue>* channel = nullptr;
-      const char* method = nullptr;
-      if (event->kind == NativeEventKind::kTermination) {
-        channel = lifecycle_channel_.get();
-        method = "prepareForTermination";
-      } else {
-        channel = acknowledged_power_event_channel_.get();
-        method = "powerEvent";
-        arguments[flutter::EncodableValue("event")] = flutter::EncodableValue(
-            event->kind == NativeEventKind::kLock ? "lock" : "sleep");
-      }
-
-      const auto callback_context = callback_context_;
-      const UINT_PTR generation = callback_generation_;
-      const auto complete = [event, callback_context, generation]() noexcept {
+      const auto drain_target = drain_target_;
+      const auto complete = [event, drain_target]() noexcept {
         NativeEventState awaiting = NativeEventState::kAwaitingReply;
         if (!event->state.compare_exchange_strong(
                 awaiting, NativeEventState::kCompleted)) {
           return;
         }
-        PostCallbackMessage(callback_context, kDrainNativeEventsMessage,
-                            generation);
+        const HWND window = drain_target->window.load();
+        if (window != nullptr) {
+          PostMessage(window, kDrainNativeEventsMessage,
+                      drain_target->generation, 0);
+        }
       };
 
-      channel->InvokeMethod(
-          method, std::make_unique<flutter::EncodableValue>(arguments),
+      lifecycle_events_channel_->InvokeMethod(
+          "lifecycleEvent",
+          std::make_unique<flutter::EncodableValue>(arguments),
           std::make_unique<
               flutter::MethodResultFunctions<flutter::EncodableValue>>(
               [complete](const flutter::EncodableValue*) { complete(); },
@@ -727,6 +614,11 @@ bool FlutterWindow::WaitForNativeEvent(
 }
 
 void FlutterWindow::PostNativeEventDrain() const noexcept {
-  PostCallbackMessage(callback_context_, kDrainNativeEventsMessage,
-                      callback_generation_);
+  if (!tearing_down_ && drain_target_) {
+    const HWND window = drain_target_->window.load();
+    if (window != nullptr) {
+      PostMessage(window, kDrainNativeEventsMessage,
+                  drain_target_->generation, 0);
+    }
+  }
 }

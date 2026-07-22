@@ -144,32 +144,8 @@ abstract interface class SingleInstanceAdapter {
   Future<void> initialize(Future<void> Function() onSecondInstanceActivated);
 }
 
-abstract interface class NativeLifecycleAdapter {
-  Future<void> initialize(
-    Future<void> Function(NativeTerminationOccurrence occurrence)
-    onTerminationRequested,
-  );
-}
-
-final class NativeTerminationOccurrence {
-  const NativeTerminationOccurrence({required this.occurredAtUtc});
-
-  final DateTime occurredAtUtc;
-}
-
 abstract interface class DisposablePlatformAdapter {
   Future<void> dispose();
-}
-
-final class UnsupportedNativeLifecycleAdapter
-    implements NativeLifecycleAdapter {
-  const UnsupportedNativeLifecycleAdapter();
-
-  @override
-  Future<void> initialize(
-    Future<void> Function(NativeTerminationOccurrence occurrence)
-    onTerminationRequested,
-  ) async {}
 }
 
 abstract interface class StartupAtLoginAdapter {
@@ -192,34 +168,37 @@ final class UnsupportedStartupAtLoginAdapter implements StartupAtLoginAdapter {
   }
 }
 
-abstract interface class PowerEventAdapter {
-  Stream<PowerEvent> get events;
+enum LifecycleEventKind {
+  lock,
+  sleep,
+  shutdown,
+  shutdownCancelled,
+  termination,
 }
 
-enum PowerEvent { lock, sleep, shutdown, shutdownCancelled }
-
-final class PowerEventOccurrence {
-  const PowerEventOccurrence({
-    required this.event,
+final class LifecycleEventOccurrence {
+  const LifecycleEventOccurrence({
+    required this.kind,
     required this.occurredAtUtc,
   });
 
-  final PowerEvent event;
+  final LifecycleEventKind kind;
   final DateTime occurredAtUtc;
 }
 
-abstract interface class AcknowledgedPowerEventAdapter
-    implements PowerEventAdapter {
-  Future<void> initializeAcknowledged(
-    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
+abstract interface class LifecycleEventAdapter {
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onEvent,
   );
 }
 
-final class UnsupportedPowerEventAdapter implements PowerEventAdapter {
-  const UnsupportedPowerEventAdapter();
+final class UnsupportedLifecycleEventAdapter implements LifecycleEventAdapter {
+  const UnsupportedLifecycleEventAdapter();
 
   @override
-  Stream<PowerEvent> get events => const Stream.empty();
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onEvent,
+  ) async {}
 }
 
 abstract interface class UserIdleDetector {

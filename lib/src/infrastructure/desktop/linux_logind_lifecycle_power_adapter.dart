@@ -29,7 +29,7 @@ abstract interface class LinuxLogindInhibitor {
 }
 
 final class LinuxLogindLifecyclePowerAdapter
-    implements AcknowledgedPowerEventAdapter, DisposablePlatformAdapter {
+    implements LifecycleEventAdapter, DisposablePlatformAdapter {
   LinuxLogindLifecyclePowerAdapter._({
     required LinuxLogindInhibitorFactory acquireInhibitor,
     required LinuxLogindSignalValueStreamFactory logindSignalValueStreamFactory,
@@ -167,7 +167,7 @@ final class LinuxLogindLifecyclePowerAdapter
 
   final List<StreamSubscription<List<DBusValue>>> _subscriptions = [];
   LinuxLogindInhibitor? _inhibitor;
-  Future<void> Function(PowerEventOccurrence occurrence)? _onPowerEvent;
+  Future<void> Function(LifecycleEventOccurrence occurrence)? _onEvent;
   Future<void> _eventChain = Future.value();
   bool _started = false;
   bool _disposed = false;
@@ -176,13 +176,10 @@ final class LinuxLogindLifecyclePowerAdapter
   int _inhibitorAcquisitionGeneration = 0;
 
   @override
-  Stream<PowerEvent> get events => const Stream.empty();
-
-  @override
-  Future<void> initializeAcknowledged(
-    Future<void> Function(PowerEventOccurrence occurrence) onPowerEvent,
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onEvent,
   ) async {
-    _onPowerEvent = onPowerEvent;
+    _onEvent = onEvent;
     await _startIfReady();
   }
 
@@ -204,7 +201,7 @@ final class LinuxLogindLifecyclePowerAdapter
   }
 
   Future<void> _startIfReady() async {
-    if (_started || _disposed || _onPowerEvent == null) {
+    if (_started || _disposed || _onEvent == null) {
       return;
     }
     _started = true;
@@ -256,10 +253,10 @@ final class LinuxLogindLifecyclePowerAdapter
 
     switch (signal.kind) {
       case LinuxLogindSignalKind.prepareForSleep:
-        await _handleTransitionStarted(PowerEvent.sleep);
+        await _handleTransitionStarted(LifecycleEventKind.sleep);
       case LinuxLogindSignalKind.prepareForShutdown:
         await _handleTransitionStarted(
-          PowerEvent.shutdown,
+          LifecycleEventKind.shutdown,
           tracksShutdownCancellation: true,
         );
     }
@@ -278,9 +275,9 @@ final class LinuxLogindLifecyclePowerAdapter
     if (!shouldEmitShutdownCancelled) {
       return;
     }
-    await _onPowerEvent?.call(
-      PowerEventOccurrence(
-        event: PowerEvent.shutdownCancelled,
+    await _onEvent?.call(
+      LifecycleEventOccurrence(
+        kind: LifecycleEventKind.shutdownCancelled,
         occurredAtUtc: _nowUtc(),
       ),
     );
@@ -294,13 +291,16 @@ final class LinuxLogindLifecyclePowerAdapter
     if (!locked) {
       return;
     }
-    await _onPowerEvent?.call(
-      PowerEventOccurrence(event: PowerEvent.lock, occurredAtUtc: _nowUtc()),
+    await _onEvent?.call(
+      LifecycleEventOccurrence(
+        kind: LifecycleEventKind.lock,
+        occurredAtUtc: _nowUtc(),
+      ),
     );
   }
 
   Future<void> _handleTransitionStarted(
-    PowerEvent event, {
+    LifecycleEventKind event, {
     bool tracksShutdownCancellation = false,
   }) async {
     _inhibitorAcquisitionGeneration += 1;
@@ -308,12 +308,12 @@ final class LinuxLogindLifecyclePowerAdapter
       _shutdownStartPendingCancellation = true;
     }
 
-    final occurrence = PowerEventOccurrence(
-      event: event,
+    final occurrence = LifecycleEventOccurrence(
+      kind: event,
       occurredAtUtc: _nowUtc(),
     );
     try {
-      await _onPowerEvent?.call(occurrence);
+      await _onEvent?.call(occurrence);
     } finally {
       await _releaseInhibitor();
     }

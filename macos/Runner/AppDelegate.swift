@@ -1,32 +1,64 @@
 import Cocoa
 import Darwin
 import FlutterMacOS
+import IOKit.pwr_mgt
 import ServiceManagement
 
+private let macOSPowerEventAcknowledgementTimeoutMilliseconds = 1800
+
+// Swift does not import the iokit_common_msg(...) C macros from IOMessage.h.
+private let macOSIOMessageCanSystemSleep: UInt32 = 0xe0000270
+private let macOSIOMessageSystemWillSleep: UInt32 = 0xe0000280
+private let macOSScreenIsLockedNotification = Notification.Name("com.apple.screenIsLocked")
+private let macOSScreenIsUnlockedNotification = Notification.Name("com.apple.screenIsUnlocked")
+
+private struct PendingLifecycleEvent {
+  let kind: String
+  let occurredAtUtc: String
+  let completion: (() -> Void)?
+}
+
 @main
-class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
+class AppDelegate: FlutterAppDelegate {
   private let clearDataFlag = "--clear-data"
   private let runningInstanceMessage = "wyd is currently running. Quit wyd before clearing data."
   private var instanceLockFileDescriptor: Int32 = -1
   private var singleInstanceChannel: FlutterMethodChannel?
-  private var lifecycleChannel: FlutterMethodChannel?
-  private var powerEventChannel: FlutterEventChannel?
+  private var lifecycleEventsChannel: FlutterMethodChannel?
   private var launchAtStartupChannels: [FlutterMethodChannel] = []
   private var pendingExistingInstanceActivation = false
   private var singleInstanceReady = false
-  private var lifecycleReady = false
+  private var lifecycleEventsReady = false
+  private var pendingLifecycleEvents: [PendingLifecycleEvent] = []
+  private var lifecycleEventDeliveryInProgress = false
+  private var terminationRequestGeneration = 0
   private var terminationRequestInProgress = false
   private var terminationRequestDeliveredToDart = false
+  private var terminationRequestOccurredAtUtc: String?
   private var terminationReplyApplication: NSApplication?
   private var terminationTimeout: DispatchWorkItem?
-  private var powerEventSink: FlutterEventSink?
+  private var sleepPowerChangeInProgress = false
+  private var sleepPowerChangeNotificationID: intptr_t?
+  private var sleepPowerChangeTimeout: DispatchWorkItem?
   private var powerObservers: [NSObjectProtocol] = []
+  private var distributedPowerObservers: [NSObjectProtocol] = []
+  private var powerEventSourcesConfigured = false
+  private var screenLockEventReported = false
+  private var systemPowerConnection: io_connect_t = IO_OBJECT_NULL
+  private var systemPowerNotificationPort: IONotificationPortRef?
+  private var systemPowerNotifier: io_object_t = IO_OBJECT_NULL
+  private let powerEventTimestampFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    return formatter
+  }()
 
   func configureFlutterChannels(for controller: FlutterViewController) {
     let binaryMessenger = controller.engine.binaryMessenger
     configureSingleInstanceChannel(binaryMessenger: binaryMessenger)
-    configureLifecycleChannel(binaryMessenger: binaryMessenger)
-    configurePowerEventChannel(binaryMessenger: binaryMessenger)
+    configureLifecycleEventsChannel(binaryMessenger: binaryMessenger)
+    configureLifecycleEventSources()
     configureLaunchAtStartupChannel(for: controller)
   }
 
@@ -208,29 +240,20 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
       return .terminateLater
     }
 
+    let occurredAtUtc = powerEventTimestampFormatter.string(from: Date())
+    terminationRequestGeneration += 1
+    let requestGeneration = terminationRequestGeneration
     terminationRequestInProgress = true
     terminationRequestDeliveredToDart = false
+    terminationRequestOccurredAtUtc = occurredAtUtc
     terminationReplyApplication = sender
-    scheduleTerminationTimeout()
-    deliverTerminationRequestIfReady()
+    scheduleTerminationTimeout(requestGeneration: requestGeneration)
+    enqueueTerminationRequestIfReady()
     return .terminateLater
   }
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return false
-  }
-
-  func onListen(
-    withArguments arguments: Any?,
-    eventSink events: @escaping FlutterEventSink
-  ) -> FlutterError? {
-    powerEventSink = events
-    return nil
-  }
-
-  func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    powerEventSink = nil
-    return nil
   }
 
   private func configureSingleInstanceChannel(binaryMessenger: FlutterBinaryMessenger) {
@@ -256,61 +279,135 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     singleInstanceChannel = channel
   }
 
-  private func configureLifecycleChannel(binaryMessenger: FlutterBinaryMessenger) {
-    guard lifecycleChannel == nil else {
+  private func configureLifecycleEventsChannel(binaryMessenger: FlutterBinaryMessenger) {
+    guard lifecycleEventsChannel == nil else {
       return
     }
 
     let channel = FlutterMethodChannel(
-      name: "dev.wyd.tracker/lifecycle",
+      name: "dev.wyd.tracker/lifecycle_events",
       binaryMessenger: binaryMessenger
     )
-    lifecycleChannel = channel
+    lifecycleEventsChannel = channel
     channel.setMethodCallHandler { [weak self] call, result in
-      guard call.method == "lifecycleReady" else {
+      guard call.method == "lifecycleEventsReady" else {
         result(FlutterMethodNotImplemented)
         return
       }
 
+      self?.lifecycleEventsReady = true
       result(nil)
-      self?.lifecycleReady = true
       DispatchQueue.main.async { [weak self] in
-        self?.deliverTerminationRequestIfReady()
+        self?.enqueueTerminationRequestIfReady()
+        self?.drainPendingLifecycleEvents()
       }
     }
   }
 
-  private func configurePowerEventChannel(binaryMessenger: FlutterBinaryMessenger) {
-    guard powerEventChannel == nil else {
+  private func configureLifecycleEventSources() {
+    guard !powerEventSourcesConfigured else {
       return
     }
+    powerEventSourcesConfigured = true
 
-    let channel = FlutterEventChannel(
-      name: "dev.wyd.tracker/power_events",
-      binaryMessenger: binaryMessenger
-    )
-    channel.setStreamHandler(self)
-    powerEventChannel = channel
-
+    let systemPowerRegistered = registerSystemPowerNotifications()
     let workspaceCenter = NSWorkspace.shared.notificationCenter
-    powerObservers.append(
-      workspaceCenter.addObserver(
-        forName: NSWorkspace.willSleepNotification,
-        object: nil,
-        queue: .main
-      ) { [weak self] _ in
-        self?.sendPowerEvent("sleep")
-      }
-    )
+    if !systemPowerRegistered {
+      powerObservers.append(
+        workspaceCenter.addObserver(
+          forName: NSWorkspace.willSleepNotification,
+          object: nil,
+          queue: .main
+        ) { [weak self] _ in
+          self?.enqueueLifecycleEvent(kind: "sleep")
+        }
+      )
+    }
     powerObservers.append(
       workspaceCenter.addObserver(
         forName: NSWorkspace.sessionDidResignActiveNotification,
         object: nil,
         queue: .main
       ) { [weak self] _ in
-        self?.sendPowerEvent("lock")
+        self?.reportScreenLockIfNeeded()
       }
     )
+    powerObservers.append(
+      workspaceCenter.addObserver(
+        forName: NSWorkspace.sessionDidBecomeActiveNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        self?.screenLockEventReported = false
+      }
+    )
+    distributedPowerObservers.append(
+      DistributedNotificationCenter.default().addObserver(
+        forName: macOSScreenIsLockedNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        self?.reportScreenLockIfNeeded()
+      }
+    )
+    distributedPowerObservers.append(
+      DistributedNotificationCenter.default().addObserver(
+        forName: macOSScreenIsUnlockedNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        self?.screenLockEventReported = false
+      }
+    )
+  }
+
+  private func registerSystemPowerNotifications() -> Bool {
+    guard systemPowerConnection == IO_OBJECT_NULL else {
+      return true
+    }
+
+    var notificationPort: IONotificationPortRef?
+    var notifier = io_object_t()
+    let refcon = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+    let connection = IORegisterForSystemPower(
+      refcon,
+      &notificationPort,
+      { refcon, _, messageType, messageArgument in
+        guard let refcon else {
+          return
+        }
+        let delegate = Unmanaged<AppDelegate>.fromOpaque(refcon).takeUnretainedValue()
+        delegate.handleSystemPowerMessage(messageType, argument: messageArgument)
+      },
+      &notifier
+    )
+
+    guard connection != IO_OBJECT_NULL, let notificationPort else {
+      if connection != IO_OBJECT_NULL {
+        IOServiceClose(connection)
+      }
+      return false
+    }
+
+    IONotificationPortSetDispatchQueue(notificationPort, DispatchQueue.main)
+    systemPowerConnection = connection
+    systemPowerNotificationPort = notificationPort
+    systemPowerNotifier = notifier
+    return true
+  }
+
+  private func handleSystemPowerMessage(
+    _ messageType: UInt32,
+    argument: UnsafeMutableRawPointer?
+  ) {
+    switch messageType {
+    case macOSIOMessageCanSystemSleep:
+      allowPowerChange(argument: argument)
+    case macOSIOMessageSystemWillSleep:
+      acknowledgeSleepBeforePowerChange(argument: argument)
+    default:
+      break
+    }
   }
 
   private func notifyExistingInstanceActivated() {
@@ -327,14 +424,130 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     }
   }
 
-  private func sendPowerEvent(_ event: String) {
-    powerEventSink?(event)
+  private func reportScreenLockIfNeeded() {
+    guard !screenLockEventReported else {
+      return
+    }
+    screenLockEventReported = true
+    enqueueLifecycleEvent(kind: "lock")
   }
 
-  private func scheduleTerminationTimeout() {
+  private func acknowledgeSleepBeforePowerChange(argument: UnsafeMutableRawPointer?) {
+    let occurrence = makeLifecycleEvent(kind: "sleep")
+    guard lifecycleEventsReady else {
+      enqueueLifecycleEvent(occurrence)
+      allowPowerChange(argument: argument)
+      return
+    }
+    guard !sleepPowerChangeInProgress else {
+      enqueueLifecycleEvent(occurrence)
+      allowPowerChange(argument: argument)
+      return
+    }
+
+    let notificationID = intptr_t(bitPattern: argument)
+    sleepPowerChangeInProgress = true
+    sleepPowerChangeNotificationID = notificationID
+    let timeout = DispatchWorkItem { [weak self] in
+      self?.finishSleepPowerChange(notificationID: notificationID)
+    }
+    sleepPowerChangeTimeout = timeout
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + .milliseconds(macOSPowerEventAcknowledgementTimeoutMilliseconds),
+      execute: timeout
+    )
+    enqueueLifecycleEvent(
+      PendingLifecycleEvent(
+        kind: occurrence.kind,
+        occurredAtUtc: occurrence.occurredAtUtc,
+        completion: { [weak self] in
+          self?.finishSleepPowerChange(notificationID: notificationID)
+        }
+      )
+    )
+  }
+
+  private func enqueueLifecycleEvent(kind: String) {
+    enqueueLifecycleEvent(makeLifecycleEvent(kind: kind))
+  }
+
+  private func enqueueLifecycleEvent(_ occurrence: PendingLifecycleEvent) {
+    pendingLifecycleEvents.append(occurrence)
+    drainPendingLifecycleEvents()
+  }
+
+  private func drainPendingLifecycleEvents() {
+    guard lifecycleEventsReady,
+          !lifecycleEventDeliveryInProgress,
+          let lifecycleEventsChannel,
+          let occurrence = pendingLifecycleEvents.first else {
+      return
+    }
+
+    lifecycleEventDeliveryInProgress = true
+    lifecycleEventsChannel.invokeMethod(
+      "lifecycleEvent",
+      arguments: lifecycleEventArguments(occurrence)
+    ) { [weak self] _ in
+      guard let self else {
+        return
+      }
+      if !self.pendingLifecycleEvents.isEmpty {
+        self.pendingLifecycleEvents.removeFirst()
+      }
+      self.lifecycleEventDeliveryInProgress = false
+      occurrence.completion?()
+      self.drainPendingLifecycleEvents()
+    }
+  }
+
+  private func finishSleepPowerChange(notificationID: intptr_t) {
+    guard sleepPowerChangeInProgress,
+          sleepPowerChangeNotificationID == notificationID else {
+      return
+    }
+
+    sleepPowerChangeTimeout?.cancel()
+    sleepPowerChangeTimeout = nil
+    sleepPowerChangeInProgress = false
+    sleepPowerChangeNotificationID = nil
+    allowPowerChange(notificationID: notificationID)
+  }
+
+  private func allowPowerChange(argument: UnsafeMutableRawPointer?) {
+    allowPowerChange(notificationID: intptr_t(bitPattern: argument))
+  }
+
+  private func allowPowerChange(notificationID: intptr_t) {
+    guard systemPowerConnection != IO_OBJECT_NULL else {
+      return
+    }
+    IOAllowPowerChange(systemPowerConnection, notificationID)
+  }
+
+  private func makeLifecycleEvent(
+    kind: String,
+    occurredAtUtc: String? = nil,
+    completion: (() -> Void)? = nil
+  ) -> PendingLifecycleEvent {
+    return PendingLifecycleEvent(
+      kind: kind,
+      occurredAtUtc: occurredAtUtc ?? powerEventTimestampFormatter.string(from: Date()),
+      completion: completion
+    )
+  }
+
+  private func lifecycleEventArguments(_ occurrence: PendingLifecycleEvent) -> [String: String] {
+    return [
+      "kind": occurrence.kind,
+      "occurredAtUtc": occurrence.occurredAtUtc,
+    ]
+  }
+
+  private func scheduleTerminationTimeout(requestGeneration: Int) {
     terminationTimeout?.cancel()
     let timeout = DispatchWorkItem { [weak self] in
-      self?.finishNativeTermination()
+      self?.finishNativeTermination(requestGeneration: requestGeneration)
     }
     terminationTimeout = timeout
     DispatchQueue.main.asyncAfter(
@@ -343,22 +556,34 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     )
   }
 
-  private func deliverTerminationRequestIfReady() {
+  private func enqueueTerminationRequestIfReady() {
     guard terminationRequestInProgress,
-          lifecycleReady,
+          lifecycleEventsReady,
           !terminationRequestDeliveredToDart,
-          let lifecycleChannel else {
+          let occurredAtUtc = terminationRequestOccurredAtUtc else {
       return
     }
 
+    let requestGeneration = terminationRequestGeneration
     terminationRequestDeliveredToDart = true
-    lifecycleChannel.invokeMethod("terminationRequested", arguments: nil) { [weak self] _ in
-      self?.finishNativeTermination()
+    let termination = makeLifecycleEvent(
+      kind: "termination",
+      occurredAtUtc: occurredAtUtc,
+      completion: { [weak self] in
+        self?.finishNativeTermination(requestGeneration: requestGeneration)
+      }
+    )
+    if lifecycleEventDeliveryInProgress, let current = pendingLifecycleEvents.first {
+      pendingLifecycleEvents = [current, termination]
+    } else {
+      pendingLifecycleEvents = [termination]
     }
+    drainPendingLifecycleEvents()
   }
 
-  private func finishNativeTermination() {
-    guard terminationRequestInProgress else {
+  private func finishNativeTermination(requestGeneration: Int) {
+    guard terminationRequestInProgress,
+          terminationRequestGeneration == requestGeneration else {
       return
     }
 
@@ -366,6 +591,7 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     terminationTimeout = nil
     terminationRequestInProgress = false
     terminationRequestDeliveredToDart = false
+    terminationRequestOccurredAtUtc = nil
     terminationReplyApplication?.reply(toApplicationShouldTerminate: true)
     terminationReplyApplication = nil
   }
@@ -376,10 +602,40 @@ class AppDelegate: FlutterAppDelegate, FlutterStreamHandler {
     }
   }
 
+  private func unregisterSystemPowerNotifications() {
+    if sleepPowerChangeInProgress, let notificationID = sleepPowerChangeNotificationID {
+      allowPowerChange(notificationID: notificationID)
+    }
+    sleepPowerChangeTimeout?.cancel()
+    sleepPowerChangeTimeout = nil
+    sleepPowerChangeInProgress = false
+    sleepPowerChangeNotificationID = nil
+
+    if systemPowerNotifier != IO_OBJECT_NULL {
+      IODeregisterForSystemPower(&systemPowerNotifier)
+      systemPowerNotifier = IO_OBJECT_NULL
+    }
+    if let notificationPort = systemPowerNotificationPort {
+      IONotificationPortSetDispatchQueue(notificationPort, nil)
+      IONotificationPortDestroy(notificationPort)
+      systemPowerNotificationPort = nil
+    }
+    if systemPowerConnection != IO_OBJECT_NULL {
+      IOServiceClose(systemPowerConnection)
+      systemPowerConnection = IO_OBJECT_NULL
+    }
+  }
+
   deinit {
+    terminationTimeout?.cancel()
+    unregisterSystemPowerNotifications()
     let workspaceCenter = NSWorkspace.shared.notificationCenter
     for observer in powerObservers {
       workspaceCenter.removeObserver(observer)
+    }
+    let distributedCenter = DistributedNotificationCenter.default()
+    for observer in distributedPowerObservers {
+      distributedCenter.removeObserver(observer)
     }
   }
 }

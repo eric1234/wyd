@@ -92,6 +92,56 @@ void main() {
       expect(harness.store.events.last.createdAtUtc, harness.clock.current);
     });
 
+    test('stopTask does not place stop before active task start', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      final taskStartedAt = harness.clock.current;
+      final sleepAt = taskStartedAt.subtract(const Duration(minutes: 1));
+
+      final snapshot = await harness.service.stopTask(
+        source: ActivitySource.systemSleep,
+        occurredAtUtc: sleepAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(harness.store.events.last.occurredAtUtc, taskStartedAt);
+    });
+
+    test('system boundary stop returns after the atomic transition', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+      final sleepAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+      final result = await harness.service.applyBoundary(
+        source: ActivitySource.systemSleep,
+        occurredAtUtc: sleepAt,
+        cleanShutdown: false,
+      );
+
+      expect(result.didStopActiveTask, isTrue);
+      expect(result.activeTask, isNull);
+      expect(result.runtimeState.cleanShutdown, isFalse);
+      expect(harness.store.events.last.source, ActivitySource.systemSleep);
+      expect(harness.store.events.last.occurredAtUtc, sleepAt);
+      expect(harness.store.events.last.createdAtUtc, harness.clock.current);
+      expect(harness.store.runtimeState.cleanShutdown, isFalse);
+    });
+
+    test('system boundary stop is idempotent while idle', () async {
+      final harness = _Harness();
+
+      final result = await harness.service.applyBoundary(
+        source: ActivitySource.systemLock,
+        occurredAtUtc: harness.clock.current,
+        cleanShutdown: false,
+      );
+
+      expect(result.didStopActiveTask, isFalse);
+      expect(result.activeTask, isNull);
+      expect(harness.store.events, isEmpty);
+    });
+
     test(
       'nag timeout writes stop at prompt shown time and marks prompt expired',
       () async {
@@ -159,6 +209,98 @@ void main() {
       expect(harness.store.events.last.source, ActivitySource.exit);
       expect(harness.store.events.last.occurredAtUtc, harness.clock.current);
     });
+
+    test('exit records explicit occurrence timestamp when supplied', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+      final shutdownAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+      final snapshot = await harness.service.exitRequested(
+        occurredAtUtc: shutdownAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(snapshot.runtimeState.cleanShutdown, isTrue);
+      expect(harness.store.events.last.source, ActivitySource.exit);
+      expect(harness.store.events.last.occurredAtUtc, shutdownAt);
+      expect(harness.store.events.last.createdAtUtc, harness.clock.current);
+    });
+
+    test('exit does not place stop before active task start', () async {
+      final harness = _Harness();
+      await harness.service.submitTask('Write docs');
+      final taskStartedAt = harness.clock.current;
+      final shutdownAt = taskStartedAt.subtract(const Duration(minutes: 1));
+
+      final snapshot = await harness.service.exitRequested(
+        occurredAtUtc: shutdownAt,
+      );
+
+      expect(snapshot.activeTask, isNull);
+      expect(harness.store.events.last.occurredAtUtc, taskStartedAt);
+    });
+
+    test(
+      'system shutdown preparation commits only the boundary state',
+      () async {
+        final harness = _Harness();
+        await harness.service.submitTask('Write docs');
+        harness.clock.current = DateTime.utc(2026, 1, 1, 10);
+        final shutdownAt = DateTime.utc(2026, 1, 1, 9, 30);
+
+        final result = await harness.service.applyBoundary(
+          occurredAtUtc: shutdownAt,
+          source: ActivitySource.exit,
+          cleanShutdown: true,
+        );
+
+        expect(result.didStopActiveTask, isTrue);
+        expect(result.activeTask, isNull);
+        expect(result.runtimeState.cleanShutdown, isTrue);
+        expect(harness.store.events.last.source, ActivitySource.exit);
+        expect(harness.store.events.last.occurredAtUtc, shutdownAt);
+        expect(harness.store.runtimeState.cleanShutdown, isTrue);
+      },
+    );
+
+    test('system shutdown preparation marks idle state clean', () async {
+      final harness = _Harness();
+
+      final result = await harness.service.applyBoundary(
+        occurredAtUtc: harness.clock.current,
+        source: ActivitySource.exit,
+        cleanShutdown: true,
+      );
+
+      expect(result.didStopActiveTask, isFalse);
+      expect(result.activeTask, isNull);
+      expect(result.runtimeState.cleanShutdown, isTrue);
+      expect(harness.store.events, isEmpty);
+      expect(harness.store.runtimeState.cleanShutdown, isTrue);
+    });
+
+    test(
+      'failed system boundary transition does not rebuild a snapshot',
+      () async {
+        final harness = _Harness();
+        await harness.service.submitTask('Write docs');
+        final lastSnapshot = harness.service.lastSnapshot;
+        harness.runner.failOnRuntimeSave = true;
+
+        await expectLater(
+          () => harness.service.applyBoundary(
+            source: ActivitySource.systemLock,
+            occurredAtUtc: harness.clock.current,
+            cleanShutdown: false,
+          ),
+          throwsStateError,
+        );
+
+        expect(harness.store.events, hasLength(1));
+        expect(harness.service.lastSnapshot, same(lastSnapshot));
+      },
+    );
 
     test('recoverOnStartup marks clean shutdown launches as running', () async {
       final harness = _Harness();

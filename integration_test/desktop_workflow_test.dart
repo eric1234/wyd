@@ -191,6 +191,9 @@ final class _IntegrationHarness {
     late final WydAppController controller;
     controller = WydAppController(
       trackerService: trackerService,
+      lifecycleCoordinator: LifecycleCoordinator(
+        trackerService: trackerService,
+      ),
       trayAdapter: tray,
       windowCoordinator: WindowCoordinator(window),
       reportController: ReportController(reportService),

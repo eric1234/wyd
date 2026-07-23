@@ -33,8 +33,13 @@ final class TrackingSession {
     required ActivitySource source,
     DateTime? createdAtUtc,
   }) {
+    final activeTask = timeline.activeTask;
+    final stopOccurredAtUtc =
+        activeTask != null && nowUtc.isBefore(activeTask.startedAtUtc)
+        ? activeTask.startedAtUtc
+        : nowUtc;
     final result = timeline.stopTask(
-      occurredAtUtc: nowUtc,
+      occurredAtUtc: stopOccurredAtUtc,
       source: source,
       createdAtUtc: createdAtUtc ?? nowUtc,
     );
@@ -53,16 +58,25 @@ final class TrackingSession {
     );
   }
 
-  TrackingTransition exitRequested({required DateTime nowUtc}) {
+  TrackingTransition exitRequested({
+    required DateTime nowUtc,
+    DateTime? occurredAtUtc,
+  }) {
     final activeTask = timeline.activeTask;
     final shouldStopActiveTask =
         activeTask != null &&
         runtimeState.promptState.status != PromptStatus.expired;
+    final requestedStopAtUtc = occurredAtUtc?.toUtc() ?? nowUtc;
+    final stopOccurredAtUtc =
+        activeTask != null &&
+            requestedStopAtUtc.isBefore(activeTask.startedAtUtc)
+        ? activeTask.startedAtUtc
+        : requestedStopAtUtc;
 
     return TrackingTransition(
       eventToAppend: shouldStopActiveTask
           ? ActivityLogEvent.stopTask(
-              occurredAtUtc: nowUtc,
+              occurredAtUtc: stopOccurredAtUtc,
               source: ActivitySource.exit,
               createdAtUtc: nowUtc,
             )

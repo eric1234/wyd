@@ -18,6 +18,18 @@ final class AppSettingsValidationException implements Exception {
   }
 }
 
+final class TrackingBoundaryResult {
+  const TrackingBoundaryResult({
+    required this.didStopActiveTask,
+    required this.activeTask,
+    required this.runtimeState,
+  });
+
+  final bool didStopActiveTask;
+  final ActiveTask? activeTask;
+  final RuntimeState runtimeState;
+}
+
 final class TrackerService {
   TrackerService({
     required TransactionRunner transactions,
@@ -76,11 +88,36 @@ final class TrackerService {
     });
   }
 
-  Future<AppStateSnapshot> exitRequested() {
+  Future<TrackingBoundaryResult> applyBoundary({
+    required ActivitySource source,
+    required DateTime occurredAtUtc,
+    required bool cleanShutdown,
+  }) {
+    return _systemBoundaryOperation((transaction, nowUtc) async {
+      final session = await _loadTrackingSession(transaction);
+      final transition = cleanShutdown
+          ? session.exitRequested(nowUtc: nowUtc, occurredAtUtc: occurredAtUtc)
+          : session.stopTask(
+              nowUtc: occurredAtUtc.toUtc(),
+              source: source,
+              createdAtUtc: nowUtc,
+            );
+      await _applyTransition(transaction, transition);
+      return TrackingBoundaryResult(
+        didStopActiveTask: transition.eventToAppend != null,
+        activeTask: transition.eventToAppend == null
+            ? session.timeline.activeTask
+            : null,
+        runtimeState: transition.runtimeState,
+      );
+    });
+  }
+
+  Future<AppStateSnapshot> exitRequested({DateTime? occurredAtUtc}) {
     return _stateChangingOperation((transaction, nowUtc) async {
       final transition = (await _loadTrackingSession(
         transaction,
-      )).exitRequested(nowUtc: nowUtc);
+      )).exitRequested(nowUtc: nowUtc, occurredAtUtc: occurredAtUtc);
       await _applyTransition(transaction, transition);
     });
   }
@@ -192,6 +229,25 @@ final class TrackerService {
               busy: false,
               errorMessage: error.toString(),
             );
+        rethrow;
+      }
+    });
+  }
+
+  Future<TrackingBoundaryResult> _systemBoundaryOperation(
+    Future<TrackingBoundaryResult> Function(
+      AppTransaction transaction,
+      DateTime nowUtc,
+    )
+    action,
+  ) {
+    return _singleWriter.run(() async {
+      try {
+        return await _transactions.run(
+          (transaction) => action(transaction, _clock.nowUtc()),
+        );
+      } catch (error, stackTrace) {
+        _logger.error('system boundary operation failed', error, stackTrace);
         rethrow;
       }
     });

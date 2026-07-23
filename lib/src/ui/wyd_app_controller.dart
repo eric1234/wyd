@@ -16,8 +16,9 @@ final class WydAppController extends ChangeNotifier {
     required Future<void> Function() onExit,
     NagScheduler? nagScheduler,
     SingleInstanceAdapter? singleInstanceAdapter,
-    NativeLifecycleAdapter? nativeLifecycleAdapter,
-    PowerEventAdapter powerEventAdapter = const UnsupportedPowerEventAdapter(),
+    required LifecycleCoordinator lifecycleCoordinator,
+    LifecycleEventAdapter lifecycleEventAdapter =
+        const UnsupportedLifecycleEventAdapter(),
     Duration? secondaryWindowWarmUpDelay = const Duration(seconds: 1),
     Future<void> Function(AppStateSnapshot snapshot)? startupAtLoginReconciler,
     Future<void> Function()? hideResidentWindow,
@@ -29,8 +30,8 @@ final class WydAppController extends ChangeNotifier {
        _onExit = onExit,
        _nagScheduler = nagScheduler,
        _singleInstanceAdapter = singleInstanceAdapter,
-       _nativeLifecycleAdapter = nativeLifecycleAdapter,
-       _powerEventAdapter = powerEventAdapter,
+       _lifecycleCoordinator = lifecycleCoordinator,
+       _lifecycleEventAdapter = lifecycleEventAdapter,
        _secondaryWindowWarmUpDelay = secondaryWindowWarmUpDelay,
        _startupAtLoginReconciler = startupAtLoginReconciler,
        _hideResidentWindow = hideResidentWindow {
@@ -49,8 +50,8 @@ final class WydAppController extends ChangeNotifier {
   final Future<void> Function() _onExit;
   final NagScheduler? _nagScheduler;
   final SingleInstanceAdapter? _singleInstanceAdapter;
-  final NativeLifecycleAdapter? _nativeLifecycleAdapter;
-  final PowerEventAdapter _powerEventAdapter;
+  final LifecycleCoordinator _lifecycleCoordinator;
+  final LifecycleEventAdapter _lifecycleEventAdapter;
   final Duration? _secondaryWindowWarmUpDelay;
   final Future<void> Function(AppStateSnapshot snapshot)?
   _startupAtLoginReconciler;
@@ -63,7 +64,7 @@ final class WydAppController extends ChangeNotifier {
   StreamSubscription<TrayMenuAction>? _menuSubscription;
   StreamSubscription<void>? _primaryClickSubscription;
   StreamSubscription<WindowRole>? _windowCloseSubscription;
-  StreamSubscription<PowerEvent>? _powerEventSubscription;
+  StreamSubscription<LifecycleUiDirective>? _lifecycleUiSubscription;
   Timer? _secondaryWindowWarmUpTimer;
 
   AppStateSnapshot? _snapshot;
@@ -71,12 +72,19 @@ final class WydAppController extends ChangeNotifier {
   String? _startupError;
   String? _runtimeErrorMessage;
   bool _initialized = false;
+  bool _disposed = false;
+  bool _platformAdaptersDisposed = false;
+  bool _manualExitInProgress = false;
+  int _deferredSystemUiGeneration = 0;
 
   AppStateSnapshot? get snapshot => _snapshot;
   WindowRole? get activeRole => _activeRole;
   String? get startupError => _startupError;
   String? get runtimeErrorMessage => _runtimeErrorMessage;
   bool get initialized => _initialized;
+  bool get _terminationInProgress {
+    return _lifecycleCoordinator.isTerminal || _manualExitInProgress;
+  }
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -94,22 +102,21 @@ final class WydAppController extends ChangeNotifier {
         tooltip: TrayMenuPresenter.buildTooltip(snapshot),
       );
       await _singleInstanceAdapter?.initialize(openQuickEntry);
-      await _nativeLifecycleAdapter?.initialize(exitRequested);
+      _lifecycleUiSubscription = _lifecycleCoordinator.directives.listen(
+        (directive) => _scheduleLifecycleUi(directive),
+      );
+      await _lifecycleEventAdapter.initialize(_lifecycleCoordinator.handle);
       _menuSubscription = _trayAdapter.menuActions.listen(_handleTrayAction);
       _primaryClickSubscription = _trayAdapter.primaryClicks.listen(
         (_) => unawaited(_runUserAction(openQuickEntry)),
       );
-      if (_powerEventAdapter case final AcknowledgedPowerEventAdapter adapter) {
-        await adapter.initializeAcknowledged(_handleAcknowledgedPowerEvent);
-      } else {
-        _powerEventSubscription = _powerEventAdapter.events.listen(
-          (event) => unawaited(_runUserAction(() => handlePowerEvent(event))),
-          onError: (Object error, StackTrace stackTrace) {
-            unawaited(handleRuntimeError(error, stackTrace));
-          },
-        );
+      if (_terminationInProgress) {
+        return;
       }
       await _openQuickEntry();
+      if (_terminationInProgress) {
+        return;
+      }
       await _reconcileStartupAtLogin(_snapshot!);
       _scheduleSecondaryWindowWarmUp();
     } catch (error) {
@@ -126,13 +133,30 @@ final class WydAppController extends ChangeNotifier {
     return _snapshot!;
   }
 
-  Future<void> _openQuickEntry({AppStateSnapshot? snapshot}) async {
+  Future<void> _openQuickEntry({
+    AppStateSnapshot? snapshot,
+    int? expectedSystemUiGeneration,
+    bool refreshIdleSuggestions = true,
+  }) async {
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      return;
+    }
     var latestSnapshot = snapshot ?? await _trackerService.loadSnapshot();
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      return;
+    }
     final shouldMarkPromptVisible =
         latestSnapshot.activeTask != null &&
         latestSnapshot.runtimeState.promptState.status == PromptStatus.none;
     _snapshot = latestSnapshot;
-    await quickEntry.open(latestSnapshot);
+    await quickEntry.open(
+      latestSnapshot,
+      refreshIdleSuggestions: refreshIdleSuggestions,
+    );
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      quickEntry.close();
+      return;
+    }
 
     _activeRole = WindowRole.quickEntry;
     notifyListeners();
@@ -144,11 +168,25 @@ final class WydAppController extends ChangeNotifier {
         configuration: WindowRoleConfiguration.quickEntry(),
       );
       windowOpened = true;
+      if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+        quickEntry.close();
+        _activeRole = null;
+        notifyListeners();
+        await _closeQuickEntryBestEffort();
+        return;
+      }
 
       if (shouldMarkPromptVisible) {
         try {
           latestSnapshot = await _trackerService.nagPromptShown();
           _snapshot = latestSnapshot;
+          if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+            quickEntry.close();
+            _activeRole = null;
+            notifyListeners();
+            await _closeQuickEntryBestEffort();
+            return;
+          }
         } catch (_) {
           quickEntry.close();
           _activeRole = null;
@@ -167,75 +205,47 @@ final class WydAppController extends ChangeNotifier {
     }
 
     await _refreshTray(latestSnapshot);
+    if (_shouldAbortQuickEntryOpen(expectedSystemUiGeneration)) {
+      quickEntry.close();
+      _activeRole = null;
+      notifyListeners();
+      await _closeQuickEntryBestEffort();
+      return;
+    }
     _nagScheduler?.update(latestSnapshot);
     notifyListeners();
   }
 
+  bool _shouldAbortQuickEntryOpen(int? expectedSystemUiGeneration) {
+    return _terminationInProgress ||
+        expectedSystemUiGeneration != null &&
+            expectedSystemUiGeneration != _deferredSystemUiGeneration;
+  }
+
   Future<void> openReport() async {
-    await _windowCoordinator.openOrFocus(WindowRole.report);
+    await _openRoleUnlessTerminating(WindowRole.report);
   }
 
   Future<void> openSettings() async {
-    await _windowCoordinator.openOrFocus(WindowRole.settings);
+    await _openRoleUnlessTerminating(WindowRole.settings);
   }
 
   Future<void> openAbout() async {
-    await _windowCoordinator.openOrFocus(WindowRole.about);
+    await _openRoleUnlessTerminating(WindowRole.about);
+  }
+
+  Future<void> _openRoleUnlessTerminating(WindowRole role) async {
+    if (_terminationInProgress) {
+      return;
+    }
+    await _windowCoordinator.openOrFocus(role);
+    if (_terminationInProgress) {
+      await _windowCoordinator.close(role);
+    }
   }
 
   Future<void> stopTask() async {
     await _stopTaskAndOpenPrompt(ActivitySource.manualStop);
-  }
-
-  Future<void> handlePowerEvent(PowerEvent event) async {
-    await _handlePowerEvent(event: event, openPromptSynchronously: true);
-  }
-
-  Future<void> _handleAcknowledgedPowerEvent(
-    PowerEventOccurrence occurrence,
-  ) async {
-    await _runUserAction(
-      () => _handlePowerEvent(
-        event: occurrence.event,
-        occurredAtUtc: occurrence.occurredAtUtc,
-        openPromptSynchronously: false,
-      ),
-    );
-  }
-
-  Future<void> _handlePowerEvent({
-    required PowerEvent event,
-    DateTime? occurredAtUtc,
-    required bool openPromptSynchronously,
-  }) async {
-    final beforeSnapshot = await _trackerService.loadSnapshot();
-    if (beforeSnapshot.activeTask == null) {
-      _snapshot = beforeSnapshot;
-      await _refreshTray(beforeSnapshot);
-      _nagScheduler?.update(beforeSnapshot);
-      notifyListeners();
-      return;
-    }
-
-    final source = switch (event) {
-      PowerEvent.lock => ActivitySource.systemLock,
-      PowerEvent.sleep => ActivitySource.systemSleep,
-    };
-    if (openPromptSynchronously) {
-      await _stopTaskAndOpenPrompt(source, occurredAtUtc: occurredAtUtc);
-      return;
-    }
-
-    final latestSnapshot = await _trackerService.stopTask(
-      source: source,
-      occurredAtUtc: occurredAtUtc,
-    );
-    _snapshot = latestSnapshot;
-    quickEntry.close();
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
-    notifyListeners();
-    unawaited(_runUserAction(() => _openQuickEntry(snapshot: latestSnapshot)));
   }
 
   Future<AppStateSnapshot> nagPromptTimedOut() async {
@@ -272,14 +282,83 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> exitRequested() async {
-    final latestSnapshot = await _trackerService.exitRequested();
-    _snapshot = latestSnapshot;
-    await _refreshTray(latestSnapshot);
-    _nagScheduler?.update(latestSnapshot);
+    if (_manualExitInProgress) {
+      return;
+    }
+    _manualExitInProgress = true;
+    _deferredSystemUiGeneration += 1;
+    try {
+      final latestSnapshot = await _trackerService.exitRequested();
+      await _applyPreparedShutdown(latestSnapshot, notify: false);
+      await _bestEffortExitCleanup();
+      await _onExit();
+    } catch (_) {
+      _manualExitInProgress = false;
+      rethrow;
+    }
+  }
+
+  Future<void> _applyPreparedShutdown(
+    AppStateSnapshot snapshot, {
+    required bool notify,
+  }) async {
     quickEntry.close();
     _activeRole = null;
-    await _bestEffortExitCleanup();
-    await _onExit();
+    await _applySnapshot(snapshot, notify: notify);
+  }
+
+  void _scheduleLifecycleUi(LifecycleUiDirective directive) {
+    final generation = ++_deferredSystemUiGeneration;
+    if (directive.terminal) {
+      _secondaryWindowWarmUpTimer?.cancel();
+    }
+    Timer.run(() {
+      unawaited(
+        _runUserAction(() => _reconcileLifecycleUi(generation, directive)),
+      );
+    });
+  }
+
+  Future<void> _reconcileLifecycleUi(
+    int generation,
+    LifecycleUiDirective directive,
+  ) async {
+    if (_shouldSkipDeferredSystemUi(generation)) {
+      return;
+    }
+    final current = _snapshot;
+    if (current == null) {
+      return;
+    }
+    final latestSnapshot = current.copyWith(
+      activeTask: directive.activeTask,
+      clearActiveTask: directive.activeTask == null,
+      runtimeState: directive.runtimeState,
+      busy: false,
+      clearErrorMessage: true,
+    );
+    _snapshot = latestSnapshot;
+    switch (directive.disposition) {
+      case LifecycleUiDisposition.hidePrompt:
+        await _applyPreparedShutdown(latestSnapshot, notify: true);
+      case LifecycleUiDisposition.showPrompt ||
+          LifecycleUiDisposition.restorePrompt:
+        quickEntry.close();
+        await _applySnapshot(latestSnapshot, notify: true);
+        await _openQuickEntry(
+          snapshot: latestSnapshot,
+          expectedSystemUiGeneration: generation,
+          refreshIdleSuggestions: false,
+        );
+      case LifecycleUiDisposition.leaveUi:
+        await _applySnapshot(latestSnapshot, notify: true);
+    }
+  }
+
+  bool _shouldSkipDeferredSystemUi(int generation) {
+    return _disposed ||
+        _terminationInProgress ||
+        generation != _deferredSystemUiGeneration;
   }
 
   Future<void> exitAfterStartupError() async {
@@ -305,6 +384,9 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> handleRuntimeError(Object error, [StackTrace? _]) async {
+    if (_disposed || _terminationInProgress) {
+      return;
+    }
     _runtimeErrorMessage = error.toString();
     quickEntry.close();
     _activeRole = WindowRole.quickEntry;
@@ -314,6 +396,10 @@ final class WydAppController extends ChangeNotifier {
         WindowRole.quickEntry,
         configuration: WindowRoleConfiguration.runtimeError(),
       );
+      if (_terminationInProgress) {
+        _activeRole = null;
+        await _closeQuickEntryBestEffort();
+      }
     } catch (_) {
       // If the error window cannot be shown, keep the error in controller state
       // so it is still visible if another window is later opened successfully.
@@ -322,11 +408,14 @@ final class WydAppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _deferredSystemUiGeneration += 1;
     _menuSubscription?.cancel();
     _primaryClickSubscription?.cancel();
     _windowCloseSubscription?.cancel();
-    _powerEventSubscription?.cancel();
+    _lifecycleUiSubscription?.cancel();
     _secondaryWindowWarmUpTimer?.cancel();
+    _disposePlatformAdapters();
     quickEntry.dispose();
     reportController?.dispose();
     settingsController?.dispose();
@@ -385,6 +474,18 @@ final class WydAppController extends ChangeNotifier {
     await _trayAdapter.updateMenu(TrayMenuPresenter.build(snapshot));
   }
 
+  Future<void> _applySnapshot(
+    AppStateSnapshot snapshot, {
+    required bool notify,
+  }) async {
+    _snapshot = snapshot;
+    await _refreshTray(snapshot);
+    _nagScheduler?.update(snapshot);
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
   Future<void> _stopTaskAndOpenPrompt(
     ActivitySource source, {
     DateTime? occurredAtUtc,
@@ -399,6 +500,9 @@ final class WydAppController extends ChangeNotifier {
   }
 
   void _scheduleSecondaryWindowWarmUp() {
+    if (_terminationInProgress) {
+      return;
+    }
     final delay = _secondaryWindowWarmUpDelay;
     if (delay == null) {
       return;
@@ -413,8 +517,15 @@ final class WydAppController extends ChangeNotifier {
 
   Future<void> _warmUpSecondaryWindows() async {
     for (final role in [WindowRole.report, WindowRole.settings]) {
+      if (_terminationInProgress) {
+        return;
+      }
       try {
         await _windowCoordinator.preload(role);
+        if (_terminationInProgress) {
+          await _windowCoordinator.close(role);
+          return;
+        }
       } catch (_) {
         // Window warm-up is only an optimization; normal open remains available.
       }
@@ -422,6 +533,7 @@ final class WydAppController extends ChangeNotifier {
   }
 
   Future<void> _showFatalStartupError(Object error) async {
+    await _disposePlatformAdaptersBestEffort();
     _startupError = error.toString();
     _activeRole = WindowRole.quickEntry;
     notifyListeners();
@@ -453,7 +565,9 @@ final class WydAppController extends ChangeNotifier {
     try {
       await action();
     } catch (error, stackTrace) {
-      await handleRuntimeError(error, stackTrace);
+      if (!_disposed) {
+        await handleRuntimeError(error, stackTrace);
+      }
     }
   }
 
@@ -470,6 +584,34 @@ final class WydAppController extends ChangeNotifier {
       await _trayAdapter.dispose().timeout(const Duration(seconds: 2));
     } catch (_) {
       // The process is exiting; stale tray cleanup is preferable to hanging.
+    }
+  }
+
+  void _disposePlatformAdapters() {
+    unawaited(_disposePlatformAdaptersBestEffort());
+  }
+
+  Future<void> _disposePlatformAdaptersBestEffort() async {
+    if (_platformAdaptersDisposed) {
+      return;
+    }
+    _platformAdaptersDisposed = true;
+
+    final adapters = <DisposablePlatformAdapter>{};
+    if (_lifecycleEventAdapter case final DisposablePlatformAdapter adapter) {
+      adapters.add(adapter);
+    }
+
+    await Future.wait(adapters.map(_disposePlatformAdapter));
+  }
+
+  Future<void> _disposePlatformAdapter(
+    DisposablePlatformAdapter adapter,
+  ) async {
+    try {
+      await adapter.dispose();
+    } catch (_) {
+      // Controller disposal should not surface late platform cleanup failures.
     }
   }
 }

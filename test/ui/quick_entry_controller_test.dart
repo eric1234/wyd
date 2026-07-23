@@ -18,6 +18,19 @@ void main() {
       expect(controller.state.selectAllOnOpen, isFalse);
     });
 
+    test('can open idle without querying suggestions', () async {
+      final client = _FakeQuickEntryClient();
+      final controller = _controller(client);
+
+      await controller.open(
+        _snapshot(activeTask: null),
+        refreshIdleSuggestions: false,
+      );
+
+      expect(controller.state.isOpen, isTrue);
+      expect(client.suggestionQueries, isEmpty);
+    });
+
     test('opens idle and highlights first recent suggestion', () async {
       final recentSuggestions = [
         _suggestion('Write docs'),

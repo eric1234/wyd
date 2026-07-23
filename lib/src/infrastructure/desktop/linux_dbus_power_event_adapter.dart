@@ -39,14 +39,17 @@ final class LinuxDbusPowerEventSource {
   bool get isLockSource => signalKind == LinuxDbusPowerSignalKind.activeChanged;
 }
 
-final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
+final class LinuxDbusPowerEventAdapter
+    implements LifecycleEventAdapter, DisposablePlatformAdapter {
   LinuxDbusPowerEventAdapter._({
     required List<LinuxDbusPowerEventSource> sources,
     required LinuxDbusSignalValueStreamFactory signalValueStreamFactory,
     required Future<void> Function() close,
+    required DiagnosticLogger logger,
   }) : _sources = List.unmodifiable(sources),
        _signalValueStreamFactory = signalValueStreamFactory,
-       _close = close;
+       _close = close,
+       _logger = logger;
 
   static const defaultRequestTimeout = Duration(seconds: 3);
 
@@ -128,6 +131,9 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
   final List<LinuxDbusPowerEventSource> _sources;
   final LinuxDbusSignalValueStreamFactory _signalValueStreamFactory;
   final Future<void> Function() _close;
+  final DiagnosticLogger _logger;
+  final List<StreamSubscription<List<DBusValue>>> _subscriptions = [];
+  bool _disposed = false;
 
   List<LinuxDbusPowerEventSource> get sources => _sources;
 
@@ -197,6 +203,7 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
             signalValueStreamFactory ??
             (source) => _signalValuesForSource(clientFor(source.bus), source),
         close: closeClients,
+        logger: logger,
       );
     } catch (error, stackTrace) {
       logger.error(
@@ -240,7 +247,7 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
     return results.whereType<LinuxDbusPowerEventSource>().toList();
   }
 
-  static PowerEvent? eventFromSignalValues(
+  static LifecycleEventKind? eventFromSignalValues(
     LinuxDbusPowerEventSource source,
     List<DBusValue> values,
   ) {
@@ -250,8 +257,8 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
     }
 
     return switch (source.signalKind) {
-      LinuxDbusPowerSignalKind.prepareForSleep => PowerEvent.sleep,
-      LinuxDbusPowerSignalKind.activeChanged => PowerEvent.lock,
+      LinuxDbusPowerSignalKind.prepareForSleep => LifecycleEventKind.sleep,
+      LinuxDbusPowerSignalKind.activeChanged => LifecycleEventKind.lock,
     };
   }
 
@@ -272,37 +279,65 @@ final class LinuxDbusPowerEventAdapter implements PowerEventAdapter {
   }
 
   @override
-  Stream<PowerEvent> get events {
-    late final StreamController<PowerEvent> controller;
-    final subscriptions = <StreamSubscription<List<DBusValue>>>[];
-
-    controller = StreamController<PowerEvent>.broadcast(
-      onListen: () {
-        for (final source in _sources) {
-          final subscription = _signalValueStreamFactory(source).listen((
-            values,
-          ) {
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onEvent,
+  ) async {
+    if (_disposed || _subscriptions.isNotEmpty) {
+      return;
+    }
+    for (final source in _sources) {
+      _subscriptions.add(
+        _signalValueStreamFactory(source).listen(
+          (values) {
             try {
-              final event = eventFromSignalValues(source, values);
-              if (event != null) {
-                controller.add(event);
+              final kind = eventFromSignalValues(source, values);
+              if (kind != null) {
+                unawaited(
+                  onEvent(
+                    LifecycleEventOccurrence(
+                      kind: kind,
+                      occurredAtUtc: DateTime.now().toUtc(),
+                    ),
+                  ).catchError((Object error, StackTrace stackTrace) {
+                    _logger.error(
+                      'Linux power event callback failed for ${source.label}',
+                      error,
+                      stackTrace,
+                    );
+                  }),
+                );
               }
             } catch (error, stackTrace) {
-              controller.addError(error, stackTrace);
+              _logger.error(
+                'Linux power event decoding failed for ${source.label}',
+                error,
+                stackTrace,
+              );
             }
-          }, onError: controller.addError);
-          subscriptions.add(subscription);
-        }
-      },
-      onCancel: () async {
-        for (final subscription in subscriptions) {
-          await subscription.cancel();
-        }
-        subscriptions.clear();
-        await _close();
-      },
-    );
-    return controller.stream;
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            _logger.error(
+              'Linux power event stream failed for ${source.label}',
+              error,
+              stackTrace,
+            );
+          },
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    _subscriptions.clear();
+    await _close();
   }
 
   static Future<bool> _probeDbusSource(

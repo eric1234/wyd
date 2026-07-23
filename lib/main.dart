@@ -102,6 +102,9 @@ Future<void> _runTrayApp() async {
     startupAtLoginAdapter: platformBindings.startupAtLoginAdapter,
   );
   final primaryWindowAdapter = SingleFlutterWindowAdapter();
+  final lifecycleCoordinator = LifecycleCoordinator(
+    trackerService: trackerService,
+  );
   late final WydAppController controller;
   final nagScheduler = NagScheduler(
     clock: clock,
@@ -120,8 +123,8 @@ Future<void> _runTrayApp() async {
     ),
     nagScheduler: nagScheduler,
     singleInstanceAdapter: MethodChannelSingleInstanceAdapter(),
-    powerEventAdapter: platformBindings.powerEventAdapter,
-    nativeLifecycleAdapter: platformBindings.nativeLifecycleAdapter,
+    lifecycleCoordinator: lifecycleCoordinator,
+    lifecycleEventAdapter: platformBindings.lifecycleEventAdapter,
     startupAtLoginReconciler: settingsService.reconcileStartAtLogin,
     hideResidentWindow: Platform.isMacOS || Platform.isWindows
         ? primaryWindowAdapter.hideResidentWindow
@@ -172,7 +175,9 @@ Future<void> _runRoleWindow(
 }) async {
   final database = await AppDatabase.openDefault();
   const clock = SystemClock();
-  final platformBindings = await DesktopPlatformBindings.current();
+  final platformBindings = await DesktopPlatformBindings.current(
+    includePowerLifecycleAdapters: false,
+  );
   final trackerService = _trackerService(
     database,
     clock,

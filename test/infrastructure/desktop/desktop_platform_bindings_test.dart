@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/infrastructure/desktop/desktop.dart';
@@ -19,50 +17,88 @@ void main() {
         bindings.startupAtLoginAdapter,
         isA<LaunchAtStartupStartupAtLoginAdapter>(),
       );
-      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
-      expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
       expect(
-        bindings.nativeLifecycleAdapter,
-        isA<UnsupportedNativeLifecycleAdapter>(),
+        bindings.lifecycleEventAdapter,
+        isA<UnsupportedLifecycleEventAdapter>(),
       );
+      expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
     });
 
     test('exposes injected Linux D-Bus power adapter', () {
-      final powerEventAdapter = _FakePowerEventAdapter();
+      final lifecycleEventAdapter = _FakeLifecycleEventAdapter();
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: true,
         isMacOS: false,
-        linuxPowerEventAdapterFactory: () => powerEventAdapter,
+        linuxLifecycleEventAdapterFactory: () => lifecycleEventAdapter,
       );
 
       expect(bindings.capabilities.supportsPowerEvents, isTrue);
-      expect(bindings.powerEventAdapter, same(powerEventAdapter));
+      expect(bindings.lifecycleEventAdapter, same(lifecycleEventAdapter));
+    });
+
+    test('uses Linux power adapter as lifecycle adapter when supported', () {
+      final adapter = _FakeLinuxLifecyclePowerAdapter();
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        linuxLifecycleEventAdapterFactory: () => adapter,
+      );
+
+      expect(bindings.capabilities.supportsPowerEvents, isTrue);
+      expect(bindings.lifecycleEventAdapter, same(adapter));
+    });
+
+    test('skips Linux power and lifecycle adapters when excluded', () {
+      var powerFactoryCalls = 0;
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: true,
+        isMacOS: false,
+        includePowerLifecycleAdapters: false,
+        linuxLifecycleEventAdapterFactory: () {
+          powerFactoryCalls += 1;
+          return _FakeLinuxLifecyclePowerAdapter();
+        },
+      );
+
+      expect(powerFactoryCalls, 0);
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(
+        bindings.lifecycleEventAdapter,
+        isA<UnsupportedLifecycleEventAdapter>(),
+      );
     });
 
     test('falls back when Linux power adapter factory returns null', () {
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: true,
         isMacOS: false,
-        linuxPowerEventAdapterFactory: () => null,
+        linuxLifecycleEventAdapterFactory: () => null,
       );
 
       expect(bindings.capabilities.supportsPowerEvents, isFalse);
-      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+      expect(
+        bindings.lifecycleEventAdapter,
+        isA<UnsupportedLifecycleEventAdapter>(),
+      );
     });
 
     test('falls back when Linux power adapter factory fails', () {
       final bindings = DesktopPlatformBindings.forPlatform(
         isLinux: true,
         isMacOS: false,
-        linuxPowerEventAdapterFactory: () => throw StateError('D-Bus failed'),
+        linuxLifecycleEventAdapterFactory: () =>
+            throw StateError('D-Bus failed'),
       );
 
       expect(bindings.capabilities.supportsPowerEvents, isFalse);
-      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
+      expect(
+        bindings.lifecycleEventAdapter,
+        isA<UnsupportedLifecycleEventAdapter>(),
+      );
     });
 
     test(
-      'enables macOS tray lifecycle, plugin power, and start-at-login bindings',
+      'enables macOS tray lifecycle, acknowledged power, and start-at-login bindings',
       () {
         final startupAtLogin = _FakeStartupAtLoginAdapter();
         final bindings = DesktopPlatformBindings.forPlatform(
@@ -78,16 +114,32 @@ void main() {
         expect(bindings.capabilities.supportsTrayRelativePositioning, isFalse);
         expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
         expect(
-          bindings.powerEventAdapter,
-          isA<DesktopScreenStatePowerEventAdapter>(),
+          bindings.lifecycleEventAdapter,
+          isA<MethodChannelLifecycleEventAdapter>(),
         );
         expect(bindings.userIdleDetector, isA<UnsupportedUserIdleDetector>());
-        expect(
-          bindings.nativeLifecycleAdapter,
-          isA<MethodChannelNativeLifecycleAdapter>(),
-        );
       },
     );
+
+    test('skips macOS power and lifecycle adapters when excluded', () {
+      var powerFactoryCalls = 0;
+      final bindings = DesktopPlatformBindings.forPlatform(
+        isLinux: false,
+        isMacOS: true,
+        includePowerLifecycleAdapters: false,
+        macOSLifecycleEventAdapterFactory: () {
+          powerFactoryCalls += 1;
+          return const MethodChannelLifecycleEventAdapter();
+        },
+      );
+
+      expect(powerFactoryCalls, 0);
+      expect(bindings.capabilities.supportsPowerEvents, isFalse);
+      expect(
+        bindings.lifecycleEventAdapter,
+        isA<UnsupportedLifecycleEventAdapter>(),
+      );
+    });
 
     test('enables Windows tray, power, and start-at-login bindings', () {
       final startupAtLogin = _FakeStartupAtLoginAdapter();
@@ -103,12 +155,8 @@ void main() {
       expect(bindings.capabilities.supportsTrayClickActions, isTrue);
       expect(bindings.startupAtLoginAdapter, same(startupAtLogin));
       expect(
-        bindings.powerEventAdapter,
-        isA<MethodChannelAcknowledgedPowerEventAdapter>(),
-      );
-      expect(
-        bindings.nativeLifecycleAdapter,
-        isA<MethodChannelNativeLifecycleAdapter>(),
+        bindings.lifecycleEventAdapter,
+        isA<MethodChannelLifecycleEventAdapter>(),
       );
     });
 
@@ -125,10 +173,9 @@ void main() {
         bindings.startupAtLoginAdapter,
         isA<UnsupportedStartupAtLoginAdapter>(),
       );
-      expect(bindings.powerEventAdapter, isA<UnsupportedPowerEventAdapter>());
       expect(
-        bindings.nativeLifecycleAdapter,
-        isA<UnsupportedNativeLifecycleAdapter>(),
+        bindings.lifecycleEventAdapter,
+        isA<UnsupportedLifecycleEventAdapter>(),
       );
     });
 
@@ -174,7 +221,16 @@ final class _FakeUserIdleDetector implements UserIdleDetector {
       null;
 }
 
-final class _FakePowerEventAdapter implements PowerEventAdapter {
+final class _FakeLifecycleEventAdapter implements LifecycleEventAdapter {
   @override
-  Stream<PowerEvent> get events => const Stream.empty();
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onEvent,
+  ) async {}
+}
+
+final class _FakeLinuxLifecyclePowerAdapter implements LifecycleEventAdapter {
+  @override
+  Future<void> initialize(
+    Future<void> Function(LifecycleEventOccurrence occurrence) onEvent,
+  ) async {}
 }

@@ -250,6 +250,38 @@ final class ReportController extends ChangeNotifier {
     await _loadVisualizationData();
   }
 
+  List<TaskTag> tagSuggestions({
+    required Iterable<TaskTag> assignedTags,
+    required String query,
+  }) {
+    final assigned = assignedTags.map((tag) => tag.normalized).toSet();
+    final excluded = assigned.toSet();
+    final preferences =
+        _state.visualizationPreferences ??
+        ReportVisualizationPreferences.defaults;
+    for (final level in preferences.tagLevels) {
+      if (level.tagTextNormalizedValues.any(assigned.contains)) {
+        excluded.addAll(level.tagTextNormalizedValues);
+      }
+    }
+
+    final queryNormalized = TaskTag.normalizeForEquality(query);
+    final prefixMatches = <TaskTag>[];
+    final substringMatches = <TaskTag>[];
+    for (final tag in _state.availableTags) {
+      if (excluded.contains(tag.normalized)) {
+        continue;
+      }
+      if (queryNormalized.isEmpty ||
+          tag.normalized.startsWith(queryNormalized)) {
+        prefixMatches.add(tag);
+      } else if (tag.normalized.contains(queryNormalized)) {
+        substringMatches.add(tag);
+      }
+    }
+    return [...prefixMatches, ...substringMatches];
+  }
+
   Future<void> setGroupingMode(ReportGroupingMode mode) async {
     final current =
         _state.visualizationPreferences ??

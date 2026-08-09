@@ -40,6 +40,10 @@ void main() {
       );
       expect(
         indexes.map((row) => row['name']),
+        contains('idx_activity_log_task_occurred'),
+      );
+      expect(
+        indexes.map((row) => row['name']),
         contains('idx_task_tags_tag_text_normalized'),
       );
     });
@@ -656,14 +660,16 @@ void main() {
   group('SqliteTaskTagRepository', () {
     late AppDatabase database;
     late SqliteTaskTagRepository repository;
+    late DateTime nowUtc;
 
     setUp(() async {
       database = await AppDatabase.openInMemory(
         databaseFactory: databaseFactoryFfi,
       );
+      nowUtc = DateTime.utc(2026, 1, 1, 9);
       repository = SqliteTaskTagRepository(
         database.database,
-        nowUtc: () => DateTime.utc(2026, 1, 1, 9),
+        nowUtc: () => nowUtc,
       );
     });
 
@@ -743,6 +749,130 @@ void main() {
       expect(tagsByTask['write docs'], [TaskTag.fromInput('Docs')]);
       expect(tagsByTask.containsKey('support call'), isFalse);
     });
+
+    test(
+      'orders tags by latest tracked activity across carrying tasks',
+      () async {
+        final activityLog = SqliteActivityLogRepository(database.database);
+        await activityLog.append(
+          ActivityLogEvent.startTask(
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 8),
+            taskText: 'Old bug task',
+          ),
+        );
+        await activityLog.append(
+          ActivityLogEvent.switchTask(
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 11),
+            taskText: 'Recent bug task',
+          ),
+        );
+        await activityLog.append(
+          ActivityLogEvent.switchTask(
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 10),
+            taskText: 'Feature task',
+          ),
+        );
+        await repository.addTag(
+          taskTextNormalized: 'old bug task',
+          tagText: 'Bug',
+        );
+        await repository.addTag(
+          taskTextNormalized: 'recent bug task',
+          tagText: 'BUG',
+        );
+        await repository.addTag(
+          taskTextNormalized: 'feature task',
+          tagText: 'Feature',
+        );
+
+        expect(await repository.allTags(), [
+          TaskTag.fromInput('BUG'),
+          TaskTag.fromInput('Feature'),
+        ]);
+      },
+    );
+
+    test('breaks recency ties by tag and newest display assignment', () async {
+      final activityLog = SqliteActivityLogRepository(database.database);
+      final tiedAt = DateTime.utc(2026, 1, 1, 10);
+      await activityLog.append(
+        ActivityLogEvent.startTask(
+          occurredAtUtc: tiedAt,
+          taskText: 'First bug task',
+        ),
+      );
+      await activityLog.append(
+        ActivityLogEvent.switchTask(
+          occurredAtUtc: tiedAt,
+          taskText: 'Second bug task',
+        ),
+      );
+      await activityLog.append(
+        ActivityLogEvent.switchTask(
+          occurredAtUtc: tiedAt,
+          taskText: 'Alpha task',
+        ),
+      );
+      await repository.addTag(
+        taskTextNormalized: 'first bug task',
+        tagText: 'Bug',
+      );
+      nowUtc = nowUtc.add(const Duration(minutes: 1));
+      await repository.addTag(
+        taskTextNormalized: 'second bug task',
+        tagText: 'BUG',
+      );
+      await repository.addTag(
+        taskTextNormalized: 'alpha task',
+        tagText: 'Alpha',
+      );
+
+      expect(await repository.allTags(), [
+        TaskTag.fromInput('Alpha'),
+        TaskTag.fromInput('BUG'),
+      ]);
+    });
+
+    test(
+      'sorts never-tracked tags last and forgets the final assignment',
+      () async {
+        final activityLog = SqliteActivityLogRepository(database.database);
+        await activityLog.append(
+          ActivityLogEvent.startTask(
+            occurredAtUtc: DateTime.utc(2026, 1, 1, 10),
+            taskText: 'Tracked task',
+          ),
+        );
+        await repository.addTag(
+          taskTextNormalized: 'tracked task',
+          tagText: 'Tracked',
+        );
+        await repository.addTag(
+          taskTextNormalized: 'missing task z',
+          tagText: 'Zulu',
+        );
+        await repository.addTag(
+          taskTextNormalized: 'missing task a',
+          tagText: 'Alpha',
+        );
+
+        expect(await repository.allTags(), [
+          TaskTag.fromInput('Tracked'),
+          TaskTag.fromInput('Alpha'),
+          TaskTag.fromInput('Zulu'),
+        ]);
+
+        await repository.removeTag(
+          taskTextNormalized: 'missing task a',
+          tagTextNormalized: 'alpha',
+        );
+
+        expect(await repository.allTags(), [
+          TaskTag.fromInput('Tracked'),
+          TaskTag.fromInput('Zulu'),
+        ]);
+      },
+    );
   });
 
   group('SqliteTransactionRunner', () {

@@ -9,7 +9,7 @@ import '../../domain/domain.dart';
 final class AppDatabase {
   AppDatabase._(this.database);
 
-  static const schemaVersion = 4;
+  static const schemaVersion = 5;
   static const databaseFileName = 'wyd.sqlite';
   static const _databaseSidecarSuffixes = ['-wal', '-shm', '-journal'];
 
@@ -150,6 +150,8 @@ CREATE INDEX idx_activity_log_event_type_occurred
 ON activity_log (event_type, occurred_at_utc)
 ''');
 
+    await _createActivityLogTaskOccurredIndex(database);
+
     await database.execute('''
 CREATE TABLE app_state (
   id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -199,6 +201,11 @@ CREATE TABLE app_state (
       currentVersion = 4;
     }
 
+    if (currentVersion < 5) {
+      await _upgradeToV5(database);
+      currentVersion = 5;
+    }
+
     if (currentVersion == newVersion) {
       return;
     }
@@ -238,6 +245,19 @@ FROM settings_v1
 
   static Future<void> _upgradeToV4(Database database) async {
     await _createReportPreferencesTables(database);
+  }
+
+  static Future<void> _upgradeToV5(Database database) async {
+    await _createActivityLogTaskOccurredIndex(database);
+  }
+
+  static Future<void> _createActivityLogTaskOccurredIndex(
+    Database database,
+  ) async {
+    await database.execute('''
+CREATE INDEX IF NOT EXISTS idx_activity_log_task_occurred
+ON activity_log (task_text_normalized, occurred_at_utc)
+''');
   }
 
   static Future<void> _createSettingsTable(Database database) async {

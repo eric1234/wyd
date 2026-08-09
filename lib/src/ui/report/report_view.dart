@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -175,6 +176,10 @@ class _TaskList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final availableTags = controller.state.availableTags;
+    final tagLevels =
+        controller.state.visualizationPreferences?.tagLevels ??
+        const <ReportTagLevel>[];
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
@@ -187,6 +192,8 @@ class _TaskList extends StatelessWidget {
             key: ValueKey('$rowKeyPrefix-${row.taskTextNormalized}'),
             row: row,
             controller: controller,
+            availableTags: availableTags,
+            tagLevels: tagLevels,
           );
         },
       ),
@@ -327,6 +334,8 @@ class _TagLevelRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = preferences.tagLevels[levelIndex].tagTextNormalizedValues;
+    final sortedAvailableTags = availableTags.toList()
+      ..sort((left, right) => left.normalized.compareTo(right.normalized));
     final usedElsewhere = <String>{
       for (var index = 0; index < preferences.tagLevels.length; index += 1)
         if (index != levelIndex)
@@ -352,7 +361,7 @@ class _TagLevelRow extends StatelessWidget {
               );
             },
             menuChildren: [
-              for (final tag in availableTags)
+              for (final tag in sortedAvailableTags)
                 if (!usedElsewhere.contains(tag.normalized))
                   CheckboxMenuButton(
                     value: selected.contains(tag.normalized),
@@ -425,32 +434,58 @@ class _ReportRowTile extends StatefulWidget {
   const _ReportRowTile({
     required this.row,
     required this.controller,
+    required this.availableTags,
+    required this.tagLevels,
     super.key,
   });
 
   final ReportRow row;
   final ReportController controller;
+  final List<TaskTag> availableTags;
+  final List<ReportTagLevel> tagLevels;
 
   @override
   State<_ReportRowTile> createState() => _ReportRowTileState();
 }
 
 class _ReportRowTileState extends State<_ReportRowTile> {
-  final TextEditingController _tagController = TextEditingController();
+  final _TagTextEditingController _tagController = _TagTextEditingController();
   final FocusNode _tagFocusNode = FocusNode();
 
   bool _adding = false;
   bool _submitting = false;
+  bool _suggestionsDismissed = false;
+  bool _refreshingAutocomplete = false;
+  int _autocompleteRevision = 0;
   String? _errorText;
 
   @override
   void initState() {
     super.initState();
+    _tagController.addListener(_tagControllerChanged);
     _tagFocusNode.addListener(_tagFocusChanged);
   }
 
   @override
+  void didUpdateWidget(_ReportRowTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final suggestionsChanged =
+        !listEquals(oldWidget.row.tags, widget.row.tags) ||
+        !listEquals(oldWidget.availableTags, widget.availableTags) ||
+        !listEquals(oldWidget.tagLevels, widget.tagLevels);
+    if (_adding && !_submitting && suggestionsChanged) {
+      _autocompleteRevision += 1;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _adding && !_submitting) {
+          _refreshAutocomplete();
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    _tagController.removeListener(_tagControllerChanged);
     _tagFocusNode.removeListener(_tagFocusChanged);
     _tagFocusNode.dispose();
     _tagController.dispose();
@@ -516,51 +551,91 @@ class _ReportRowTileState extends State<_ReportRowTile> {
   Widget _buildTagInput(BuildContext context, WydLayoutMetrics metrics) {
     return SizedBox(
       width: metrics.maxWidth(12, min: 160),
-      child: Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.escape): _CancelTagInputIntent(),
+      child: RawAutocomplete<TaskTag>(
+        key: ValueKey(_autocompleteRevision),
+        textEditingController: _tagController,
+        focusNode: _tagFocusNode,
+        displayStringForOption: (tag) => tag.text,
+        optionsViewOpenDirection: OptionsViewOpenDirection.mostSpace,
+        optionsBuilder: (value) {
+          if (_submitting || _suggestionsDismissed) {
+            return const Iterable<TaskTag>.empty();
+          }
+          return widget.controller.tagSuggestions(
+            assignedTags: widget.row.tags,
+            query: value.text,
+          );
         },
-        child: Actions(
-          actions: {
-            _CancelTagInputIntent: CallbackAction<_CancelTagInputIntent>(
-              onInvoke: (_) {
-                _cancelAdding();
-                return null;
-              },
-            ),
-          },
-          child: TextField(
-            controller: _tagController,
-            focusNode: _tagFocusNode,
-            autofocus: true,
-            enabled: !_submitting,
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              isDense: true,
-              labelText: 'New tag',
-              errorText: _errorText,
-              suffixIcon: _submitting
-                  ? Padding(
-                      padding: metrics.insetsAll(0.75),
-                      child: const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+        onSelected: (tag) => unawaited(_submitTag(tagText: tag.text)),
+        optionsViewBuilder: (context, onSelected, options) {
+          return _TagOptionsView(
+            options: options.toList(),
+            onSelected: onSelected,
+          );
+        },
+        fieldViewBuilder:
+            (context, textController, focusNode, onFieldSubmitted) {
+              return Builder(
+                builder: (fieldContext) => Shortcuts(
+                  shortcuts: const {
+                    SingleActivator(LogicalKeyboardKey.escape):
+                        _DismissTagSuggestionsIntent(),
+                  },
+                  child: Actions(
+                    actions: {
+                      _DismissTagSuggestionsIntent:
+                          CallbackAction<_DismissTagSuggestionsIntent>(
+                            onInvoke: (_) {
+                              if (_dismissSuggestionsOrCancel()) {
+                                Actions.invoke(
+                                  fieldContext,
+                                  const DismissIntent(),
+                                );
+                              }
+                              return null;
+                            },
+                          ),
+                    },
+                    child: TextField(
+                      controller: textController,
+                      focusNode: focusNode,
+                      autofocus: true,
+                      enabled: !_submitting,
+                      textInputAction: TextInputAction.done,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        labelText: 'New tag',
+                        errorText: _errorText,
+                        suffixIcon: _submitting
+                            ? Padding(
+                                padding: metrics.insetsAll(0.75),
+                                child: const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : IconButton(
+                                tooltip: 'Add tag',
+                                onPressed: () => unawaited(_submitTag()),
+                                icon: const Icon(Icons.check),
+                              ),
                       ),
-                    )
-                  : IconButton(
-                      tooltip: 'Add tag',
-                      onPressed: () => unawaited(_submitTag()),
-                      icon: const Icon(Icons.check),
+                      onChanged: _tagTextChanged,
+                      onSubmitted: (_) {
+                        final suggestions = _currentTagSuggestions();
+                        if (!_suggestionsDismissed && suggestions.isNotEmpty) {
+                          onFieldSubmitted();
+                        } else {
+                          unawaited(_submitTag());
+                        }
+                      },
                     ),
-            ),
-            onChanged: (_) {
-              if (_errorText != null) {
-                setState(() => _errorText = null);
-              }
+                  ),
+                ),
+              );
             },
-            onSubmitted: (_) => unawaited(_submitTag()),
-          ),
-        ),
       ),
     );
   }
@@ -568,12 +643,15 @@ class _ReportRowTileState extends State<_ReportRowTile> {
   void _startAdding() {
     setState(() {
       _adding = true;
+      _suggestionsDismissed = false;
+      _autocompleteRevision += 1;
       _errorText = null;
       _tagController.clear();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _tagFocusNode.requestFocus();
+        _refreshAutocomplete();
       }
     });
   }
@@ -585,19 +663,20 @@ class _ReportRowTileState extends State<_ReportRowTile> {
 
     setState(() {
       _adding = false;
+      _suggestionsDismissed = false;
       _errorText = null;
       _tagController.clear();
     });
   }
 
-  Future<void> _submitTag() async {
+  Future<void> _submitTag({String? tagText}) async {
     if (_submitting) {
       return;
     }
 
     late final TaskTag draft;
     try {
-      draft = TaskTag.fromInput(_tagController.text);
+      draft = TaskTag.fromInput(tagText ?? _tagController.text);
     } on TaskTagValidationException catch (error) {
       setState(() => _errorText = error.message);
       return;
@@ -627,6 +706,7 @@ class _ReportRowTileState extends State<_ReportRowTile> {
       setState(() {
         _adding = false;
         _submitting = false;
+        _suggestionsDismissed = false;
         _tagController.clear();
       });
     } catch (error) {
@@ -635,7 +715,14 @@ class _ReportRowTileState extends State<_ReportRowTile> {
       }
       setState(() {
         _submitting = false;
+        _autocompleteRevision += 1;
         _errorText = error.toString();
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _adding && !_submitting) {
+          _tagFocusNode.requestFocus();
+          _refreshAutocomplete();
+        }
       });
     }
   }
@@ -693,10 +780,146 @@ class _ReportRowTileState extends State<_ReportRowTile> {
       _cancelAdding();
     }
   }
+
+  List<TaskTag> _currentTagSuggestions() {
+    return widget.controller.tagSuggestions(
+      assignedTags: widget.row.tags,
+      query: _tagController.text,
+    );
+  }
+
+  void _tagTextChanged(String _) {
+    if (_errorText != null) {
+      setState(() => _errorText = null);
+    }
+  }
+
+  void _tagControllerChanged() {
+    if (_suggestionsDismissed && !_refreshingAutocomplete) {
+      setState(() => _suggestionsDismissed = false);
+    }
+  }
+
+  void _refreshAutocomplete() {
+    _refreshingAutocomplete = true;
+    try {
+      _tagController.refreshAutocomplete();
+    } finally {
+      _refreshingAutocomplete = false;
+    }
+  }
+
+  bool _dismissSuggestionsOrCancel() {
+    if (!_suggestionsDismissed && _currentTagSuggestions().isNotEmpty) {
+      setState(() => _suggestionsDismissed = true);
+      return true;
+    }
+    _cancelAdding();
+    return false;
+  }
 }
 
-final class _CancelTagInputIntent extends Intent {
-  const _CancelTagInputIntent();
+class _DismissTagSuggestionsIntent extends Intent {
+  const _DismissTagSuggestionsIntent();
+}
+
+class _TagOptionsView extends StatefulWidget {
+  const _TagOptionsView({required this.options, required this.onSelected});
+
+  final List<TaskTag> options;
+  final AutocompleteOnSelected<TaskTag> onSelected;
+
+  @override
+  State<_TagOptionsView> createState() => _TagOptionsViewState();
+}
+
+class _TagOptionsViewState extends State<_TagOptionsView> {
+  final ScrollController _scrollController = ScrollController();
+  int? _lastHighlightedIndex;
+
+  @override
+  void didUpdateWidget(_TagOptionsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.options, widget.options)) {
+      _lastHighlightedIndex = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = WydLayoutMetrics.of(context);
+    final rowHeight = metrics.atLeast(40, 2.5);
+    final highlightedIndex = AutocompleteHighlightedOption.of(context);
+    _ensureHighlightedVisible(highlightedIndex, rowHeight);
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(metrics.size(0.5)),
+      clipBehavior: Clip.antiAlias,
+      color: Theme.of(context).colorScheme.surfaceContainer,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: rowHeight * 5,
+          minWidth: metrics.maxWidth(12, min: 160),
+        ),
+        child: ListView.builder(
+          controller: _scrollController,
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          itemExtent: rowHeight,
+          itemCount: widget.options.length,
+          itemBuilder: (context, index) {
+            final option = widget.options[index];
+            final highlighted = index == highlightedIndex;
+            return InkWell(
+              onTap: () => widget.onSelected(option),
+              child: Container(
+                alignment: Alignment.centerLeft,
+                padding: metrics.insetsSymmetric(horizontal: 0.75),
+                color: highlighted
+                    ? Theme.of(context).colorScheme.secondaryContainer
+                    : null,
+                child: Text(
+                  option.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _ensureHighlightedVisible(int index, double rowHeight) {
+    if (_lastHighlightedIndex == index) {
+      return;
+    }
+    _lastHighlightedIndex = index;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
+      final position = _scrollController.position;
+      final itemTop = index * rowHeight;
+      final itemBottom = itemTop + rowHeight;
+      if (itemTop < position.pixels) {
+        _scrollController.jumpTo(itemTop);
+      } else if (itemBottom > position.pixels + position.viewportDimension) {
+        _scrollController.jumpTo(itemBottom - position.viewportDimension);
+      }
+    });
+  }
+}
+
+class _TagTextEditingController extends TextEditingController {
+  void refreshAutocomplete() => notifyListeners();
 }
 
 class _DateHeader extends StatelessWidget {

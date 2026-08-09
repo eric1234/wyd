@@ -389,6 +389,56 @@ void main() {
         }
       }
     });
+
+    test('migrates version 5 report preferences to three levels', () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'wyd_sqlite_v6_migration_',
+      );
+      final databasePath = p.join(tempDirectory.path, 'wyd.sqlite');
+      AppDatabase? database;
+
+      try {
+        database = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+          schemaVersion: 5,
+        );
+        final oldRepository = SqliteReportPreferencesRepository(
+          database.database,
+        );
+        final oldPreferences = ReportVisualizationPreferences(
+          mode: ReportGroupingMode.tags,
+          tagLevels: [
+            ReportTagLevel(['client']),
+            ReportTagLevel(['build']),
+          ],
+        );
+        await oldRepository.save(oldPreferences);
+        await database.close();
+        database = null;
+
+        database = await AppDatabase.openAtPath(
+          databasePath,
+          databaseFactory: databaseFactoryFfi,
+        );
+        final repository = SqliteReportPreferencesRepository(database.database);
+        expect(await repository.read(), oldPreferences);
+
+        final threeLevels = oldPreferences.copyWith(
+          tagLevels: [
+            ...oldPreferences.tagLevels,
+            ReportTagLevel(['planned']),
+          ],
+        );
+        await repository.save(threeLevels);
+        expect(await repository.read(), threeLevels);
+      } finally {
+        await database?.close();
+        if (await tempDirectory.exists()) {
+          await tempDirectory.delete(recursive: true);
+        }
+      }
+    });
   });
 
   group('SqliteReportPreferencesRepository', () {
@@ -406,6 +456,7 @@ void main() {
         tagLevels: [
           ReportTagLevel(['client-a', 'client-b']),
           ReportTagLevel(['build', 'review']),
+          ReportTagLevel(['planned', 'urgent']),
         ],
       );
       await repository.save(preferences);

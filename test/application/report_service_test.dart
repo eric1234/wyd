@@ -414,6 +414,28 @@ void main() {
       );
     });
 
+    test('adds three tag levels but not a fourth', () async {
+      final saved = <ReportVisualizationPreferences>[];
+      final loader = _StaticActivityReportLoader(
+        report: _report(DateTime(2026, 1, 2), 'Task'),
+        preferenceSaver: (preferences) async => saved.add(preferences),
+      );
+      final controller = ReportController(loader);
+      addTearDown(controller.dispose);
+      await controller.open();
+
+      await controller.setGroupingMode(ReportGroupingMode.tags);
+      await controller.addTagLevel();
+      await controller.addTagLevel();
+      await controller.addTagLevel();
+
+      expect(
+        controller.state.visualizationPreferences!.tagLevels,
+        hasLength(3),
+      );
+      expect(saved.last.tagLevels, hasLength(3));
+    });
+
     test('updates current report tags after add and remove', () async {
       final client = _StaticActivityReportLoader(
         report: _report(DateTime(2026, 1, 2), 'Fix bug'),
@@ -497,6 +519,7 @@ void main() {
         tagLevels: [
           ReportTagLevel(['bug', 'feature']),
           ReportTagLevel(['client', 'internal']),
+          ReportTagLevel(['planned']),
         ],
       );
       final client = _StaticActivityReportLoader(
@@ -508,6 +531,7 @@ void main() {
             TaskTag.fromInput('Bug'),
             TaskTag.fromInput('Client'),
             TaskTag.fromInput('Docs'),
+            TaskTag.fromInput('Planned'),
           ],
           preferences: preferences,
         ),
@@ -525,6 +549,7 @@ void main() {
           TaskTag.fromInput('Internal'),
           TaskTag.fromInput('Client'),
           TaskTag.fromInput('Docs'),
+          TaskTag.fromInput('Planned'),
         ],
       );
       expect(
@@ -536,7 +561,7 @@ void main() {
           ],
           query: '',
         ),
-        [TaskTag.fromInput('Docs')],
+        [TaskTag.fromInput('Docs'), TaskTag.fromInput('Planned')],
       );
     });
   });

@@ -9,7 +9,7 @@ import '../../domain/domain.dart';
 final class AppDatabase {
   AppDatabase._(this.database);
 
-  static const schemaVersion = 5;
+  static const schemaVersion = 6;
   static const databaseFileName = 'wyd.sqlite';
   static const _databaseSidecarSuffixes = ['-wal', '-shm', '-journal'];
 
@@ -206,6 +206,11 @@ CREATE TABLE app_state (
       currentVersion = 5;
     }
 
+    if (currentVersion < 6) {
+      await _upgradeToV6(database);
+      currentVersion = 6;
+    }
+
     if (currentVersion == newVersion) {
       return;
     }
@@ -249,6 +254,26 @@ FROM settings_v1
 
   static Future<void> _upgradeToV5(Database database) async {
     await _createActivityLogTaskOccurredIndex(database);
+  }
+
+  static Future<void> _upgradeToV6(Database database) async {
+    await database.execute(
+      'ALTER TABLE report_preference_tags RENAME TO report_preference_tags_v5',
+    );
+    await _createReportPreferenceTagsTable(database);
+    await database.execute('''
+INSERT INTO report_preference_tags (
+  level_index,
+  tag_text_normalized,
+  position
+)
+SELECT
+  level_index,
+  tag_text_normalized,
+  position
+FROM report_preference_tags_v5
+''');
+    await database.execute('DROP TABLE report_preference_tags_v5');
   }
 
   static Future<void> _createActivityLogTaskOccurredIndex(
@@ -301,9 +326,15 @@ CREATE TABLE report_preferences (
   grouping_mode TEXT NOT NULL CHECK(grouping_mode IN ('task', 'tags'))
 )
 ''');
+    await _createReportPreferenceTagsTable(database);
+  }
+
+  static Future<void> _createReportPreferenceTagsTable(
+    Database database,
+  ) async {
     await database.execute('''
 CREATE TABLE report_preference_tags (
-  level_index INTEGER NOT NULL CHECK(level_index BETWEEN 0 AND 1),
+  level_index INTEGER NOT NULL CHECK(level_index BETWEEN 0 AND ${ReportVisualizationPreferences.maxTagLevels - 1}),
   tag_text_normalized TEXT NOT NULL,
   position INTEGER NOT NULL CHECK(position >= 0),
   PRIMARY KEY (level_index, tag_text_normalized),

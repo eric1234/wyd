@@ -47,7 +47,7 @@ final class ReportVisualizationPreferences {
     }
   }
 
-  static const maxTagLevels = 2;
+  static const maxTagLevels = 3;
   static final defaults = ReportVisualizationPreferences(
     mode: ReportGroupingMode.task,
   );

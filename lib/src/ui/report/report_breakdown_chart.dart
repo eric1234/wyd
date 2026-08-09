@@ -265,7 +265,7 @@ class _BreakdownLegendRow extends StatelessWidget {
               '${segment.displayPath}, ${_formatVisualizationDuration(segment.node.duration)}, ${percentage.toStringAsFixed(1)} percent of total',
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 100),
-            padding: EdgeInsets.fromLTRB(segment.depth == 0 ? 0 : 18, 3, 0, 3),
+            padding: EdgeInsets.fromLTRB(segment.depth * 18, 3, 0, 3),
             decoration: BoxDecoration(
               color: highlighted
                   ? Theme.of(
@@ -440,7 +440,7 @@ List<_ReportChartSegment> _buildSegments(
   if (breakdown.totalDuration.inMicroseconds <= 0) {
     return const [];
   }
-  final nested = breakdown.nodes.any((node) => node.children.isNotEmpty);
+  final maxDepth = _maximumDepth(breakdown.nodes);
   final segments = <_ReportChartSegment>[];
   var rootStart = 0.0;
   for (final root in breakdown.nodes) {
@@ -449,47 +449,97 @@ List<_ReportChartSegment> _buildSegments(
         breakdown.totalDuration.inMicroseconds *
         2 *
         math.pi;
-    segments.add(
-      _ReportChartSegment(
-        node: root,
-        displayPath: root.label,
-        legendLabel: root.label,
-        depth: 0,
-        startAngleOffset: rootStart,
-        sweepAngle: rootSweep,
-        innerRadiusFactor: nested ? 0.72 : 0.5,
-        outerRadiusFactor: 0.98,
-        color: palette.colorFor(root.path),
-      ),
+    _appendSegments(
+      segments: segments,
+      node: root,
+      depth: 0,
+      maxDepth: maxDepth,
+      startAngleOffset: rootStart,
+      sweepAngle: rootSweep,
+      totalDuration: breakdown.totalDuration,
+      displayPath: root.label,
+      palette: palette,
     );
-
-    var childStart = rootStart;
-    for (final child in root.children) {
-      final childSweep =
-          child.duration.inMicroseconds /
-          breakdown.totalDuration.inMicroseconds *
-          2 *
-          math.pi;
-      segments.add(
-        _ReportChartSegment(
-          node: child,
-          displayPath: '${root.label} / ${child.label}',
-          legendLabel: child.label,
-          depth: 1,
-          startAngleOffset: childStart,
-          sweepAngle: childSweep,
-          innerRadiusFactor: 0.42,
-          outerRadiusFactor: 0.68,
-          color: palette.colorFor(child.path),
-          parentLabel: root.label,
-          parentDuration: root.duration,
-        ),
-      );
-      childStart += childSweep;
-    }
     rootStart += rootSweep;
   }
   return segments;
+}
+
+void _appendSegments({
+  required List<_ReportChartSegment> segments,
+  required ReportBreakdownNode node,
+  required int depth,
+  required int maxDepth,
+  required double startAngleOffset,
+  required double sweepAngle,
+  required Duration totalDuration,
+  required String displayPath,
+  required _ReportChartPalette palette,
+  ReportBreakdownNode? parent,
+}) {
+  final radii = _ringRadii(depth, maxDepth);
+  segments.add(
+    _ReportChartSegment(
+      node: node,
+      displayPath: displayPath,
+      legendLabel: node.label,
+      depth: depth,
+      startAngleOffset: startAngleOffset,
+      sweepAngle: sweepAngle,
+      innerRadiusFactor: radii.$1,
+      outerRadiusFactor: radii.$2,
+      color: palette.colorFor(node.path),
+      parentLabel: parent?.label,
+      parentDuration: parent?.duration,
+    ),
+  );
+
+  var childStart = startAngleOffset;
+  for (final child in node.children) {
+    final childSweep =
+        child.duration.inMicroseconds /
+        totalDuration.inMicroseconds *
+        2 *
+        math.pi;
+    _appendSegments(
+      segments: segments,
+      node: child,
+      depth: depth + 1,
+      maxDepth: maxDepth,
+      startAngleOffset: childStart,
+      sweepAngle: childSweep,
+      totalDuration: totalDuration,
+      displayPath: '$displayPath / ${child.label}',
+      palette: palette,
+      parent: node,
+    );
+    childStart += childSweep;
+  }
+}
+
+int _maximumDepth(List<ReportBreakdownNode> nodes) {
+  var maximum = 0;
+  for (final node in nodes) {
+    if (node.children.isNotEmpty) {
+      maximum = math.max(maximum, 1 + _maximumDepth(node.children));
+    }
+  }
+  return maximum;
+}
+
+(double, double) _ringRadii(int depth, int maxDepth) {
+  if (maxDepth == 0) {
+    return (0.5, 0.98);
+  }
+  if (maxDepth == 1) {
+    return depth == 0 ? (0.72, 0.98) : (0.42, 0.68);
+  }
+
+  return switch (depth) {
+    0 => (0.76, 0.98),
+    1 => (0.52, 0.72),
+    _ => (0.28, 0.48),
+  };
 }
 
 final class _ReportChartSegment {
@@ -545,26 +595,41 @@ final class _ReportChartPalette {
       colors[root.path] = rootColor;
     }
 
-    final childPathsByIdentity = <String, List<String>>{};
-    for (final root in roots) {
-      for (final child in root.children) {
-        childPathsByIdentity.putIfAbsent(child.id, () => []).add(child.path);
+    final pathsByDepthAndIdentity = <(int, String), List<String>>{};
+    void collectDescendants(ReportBreakdownNode node, int depth) {
+      for (final child in node.children) {
+        pathsByDepthAndIdentity
+            .putIfAbsent((depth + 1, child.id), () => [])
+            .add(child.path);
+        collectDescendants(child, depth + 1);
       }
     }
-    final childIdentities = childPathsByIdentity.keys.toList()..sort();
-    for (final identity in childIdentities) {
+
+    for (final root in roots) {
+      collectDescendants(root, 0);
+    }
+    final descendantIdentities = pathsByDepthAndIdentity.keys.toList()
+      ..sort((left, right) {
+        final depthComparison = left.$1.compareTo(right.$1);
+        return depthComparison != 0
+            ? depthComparison
+            : left.$2.compareTo(right.$2);
+      });
+    for (final key in descendantIdentities) {
       final hue = _allocateHue(
-        _stableHash('level-2:$identity') % 360.0,
+        _stableHash('level-${key.$1 + 1}:${key.$2}') % 360.0,
         usedHues,
       );
       usedHues.add(hue);
       final color = HSLColor.fromAHSL(
         1,
         hue,
-        0.76,
-        brightness == Brightness.dark ? 0.74 : 0.58,
+        math.max(0.58, 0.76 - key.$1 * 0.08),
+        brightness == Brightness.dark
+            ? math.min(0.82, 0.66 + key.$1 * 0.08)
+            : math.min(0.70, 0.50 + key.$1 * 0.08),
       ).toColor();
-      for (final path in childPathsByIdentity[identity]!) {
+      for (final path in pathsByDepthAndIdentity[key]!) {
         colors[path] = color;
       }
     }

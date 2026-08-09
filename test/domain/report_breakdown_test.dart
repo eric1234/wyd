@@ -94,6 +94,47 @@ void main() {
     }
   });
 
+  test('three tag levels build a conserving hierarchy', () {
+    final client = TaskTag.fromInput('Client');
+    final internal = TaskTag.fromInput('Internal');
+    final build = TaskTag.fromInput('Build');
+    final review = TaskTag.fromInput('Review');
+    final planned = TaskTag.fromInput('Planned');
+    final urgent = TaskTag.fromInput('Urgent');
+    final report = ActivityReport(
+      totalDuration: const Duration(hours: 4),
+      rows: [
+        _row('A', tags: [client, build, planned]),
+        _row('B', tags: [client, review, urgent]),
+        _row('C', tags: [internal, planned]),
+        _row('D'),
+      ],
+    );
+    final preferences = ReportVisualizationPreferences(
+      mode: ReportGroupingMode.tags,
+      tagLevels: [
+        ReportTagLevel(['client', 'internal']),
+        ReportTagLevel(['build', 'review']),
+        ReportTagLevel(['planned', 'urgent']),
+      ],
+    );
+
+    final breakdown = buildReportBreakdown(report, preferences);
+
+    for (final parent in breakdown.nodes) {
+      expect(_childrenDuration(parent), parent.duration);
+      for (final child in parent.children) {
+        expect(_childrenDuration(child), child.duration);
+      }
+    }
+    expect(
+      breakdown.nodes
+          .expand((node) => node.children)
+          .expand((node) => node.children),
+      isNotEmpty,
+    );
+  });
+
   test('preferences reject duplicate tags across levels', () {
     expect(
       () => ReportVisualizationPreferences(
@@ -132,5 +173,12 @@ ReportRow _row(String task, {List<TaskTag> tags = const []}) {
     taskTextNormalized: task.toLowerCase(),
     duration: const Duration(hours: 1),
     tags: tags,
+  );
+}
+
+Duration _childrenDuration(ReportBreakdownNode node) {
+  return node.children.fold(
+    Duration.zero,
+    (total, child) => total + child.duration,
   );
 }

@@ -6,7 +6,7 @@ import 'package:wyd/src/domain/domain.dart';
 import 'package:wyd/src/ui/report/report_breakdown_chart.dart';
 
 void main() {
-  testWidgets('legend uses indentation and concise level two labels', (
+  testWidgets('legend uses indentation and concise nested labels', (
     tester,
   ) async {
     await tester.pumpWidget(_harness(_breakdown()));
@@ -15,6 +15,7 @@ void main() {
     expect(find.text('Foo'), findsOneWidget);
     expect(find.text('Boo'), findsOneWidget);
     expect(find.text('Baz'), findsNWidgets(2));
+    expect(find.text('Qux'), findsNWidgets(3));
     expect(find.textContaining(' / '), findsNothing);
     expect(find.text('L1'), findsNothing);
     expect(find.text('L2'), findsNothing);
@@ -39,6 +40,25 @@ void main() {
     expect(barBaz, fooBaz);
     expect(barBoo, isNot(barBaz));
     expect(colorFor('tag:bar'), isNot(barBaz));
+  });
+
+  testWidgets('same level three tag shares a unique color across parents', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_harness(_breakdown()));
+
+    Color colorFor(String path) {
+      final marker = tester.widget<Container>(
+        find.byKey(ValueKey('report-breakdown-color-$path')),
+      );
+      return (marker.decoration! as BoxDecoration).color!;
+    }
+
+    final barBooQux = colorFor('tag:bar/tag:boo/tag:qux');
+    final fooBazQux = colorFor('tag:foo/tag:baz/tag:qux');
+
+    expect(barBooQux, fooBazQux);
+    expect(barBooQux, isNot(colorFor('tag:bar/tag:boo')));
   });
 
   testWidgets('large saturated palettes finish allocating colors', (
@@ -77,9 +97,7 @@ void main() {
     );
   });
 
-  testWidgets('outer ring hovers level one and inner ring hovers level two', (
-    tester,
-  ) async {
+  testWidgets('all three rings show their nested tooltip', (tester) async {
     await tester.pumpWidget(_harness(_breakdown()));
     final chartRect = tester.getRect(
       find.byKey(const ValueKey('report-breakdown-radial-chart')),
@@ -89,7 +107,7 @@ void main() {
       mouse.addPointer(location: chartRect.center),
     );
 
-    final outerOffset = chartRect.shortestSide * 0.30;
+    final outerOffset = chartRect.shortestSide * 0.31;
     await tester.sendEventToBinding(
       mouse.hover(chartRect.center + Offset(outerOffset, -outerOffset)),
     );
@@ -103,9 +121,9 @@ void main() {
       findsOneWidget,
     );
 
-    final innerOffset = chartRect.shortestSide * 0.19;
+    final middleOffset = chartRect.shortestSide * 0.22;
     await tester.sendEventToBinding(
-      mouse.hover(chartRect.center + Offset(innerOffset, -innerOffset)),
+      mouse.hover(chartRect.center + Offset(middleOffset, -middleOffset)),
     );
     await tester.pump();
 
@@ -117,6 +135,21 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('% of Bar'), findsOneWidget);
+
+    final innerOffset = chartRect.shortestSide * 0.13;
+    await tester.sendEventToBinding(
+      mouse.hover(chartRect.center + Offset(innerOffset, -innerOffset)),
+    );
+    await tester.pump();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('report-breakdown-tooltip')),
+        matching: find.text('Bar / Boo / Qux'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('% of Boo'), findsOneWidget);
 
     await tester.sendEventToBinding(mouse.removePointer());
   });
@@ -151,12 +184,28 @@ ReportBreakdown _breakdown() {
             path: 'tag:bar/tag:boo',
             label: 'Boo',
             duration: Duration(minutes: 2),
+            children: [
+              ReportBreakdownNode(
+                id: 'tag:qux',
+                path: 'tag:bar/tag:boo/tag:qux',
+                label: 'Qux',
+                duration: Duration(minutes: 2),
+              ),
+            ],
           ),
           ReportBreakdownNode(
             id: 'tag:baz',
             path: 'tag:bar/tag:baz',
             label: 'Baz',
             duration: Duration(minutes: 1),
+            children: [
+              ReportBreakdownNode(
+                id: 'tag:qux',
+                path: 'tag:bar/tag:baz/tag:qux',
+                label: 'Qux',
+                duration: Duration(minutes: 1),
+              ),
+            ],
           ),
         ],
       ),
@@ -171,6 +220,14 @@ ReportBreakdown _breakdown() {
             path: 'tag:foo/tag:baz',
             label: 'Baz',
             duration: Duration(minutes: 1),
+            children: [
+              ReportBreakdownNode(
+                id: 'tag:qux',
+                path: 'tag:foo/tag:baz/tag:qux',
+                label: 'Qux',
+                duration: Duration(minutes: 1),
+              ),
+            ],
           ),
         ],
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wyd/src/application/application.dart';
 import 'package:wyd/src/domain/domain.dart';
@@ -116,6 +117,288 @@ void main() {
       expect(loader.addCalls.single.taskTextNormalized, 'write docs');
       expect(loader.addCalls.single.tagText, 'Bug');
       expect(find.text('Bug'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('shows eligible tags and adds a clicked suggestion immediately', (
+    tester,
+  ) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+      availableTags: [TaskTag.fromInput('Feature'), TaskTag.fromInput('Bug')],
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Feature'), findsOneWidget);
+      expect(find.text('Bug'), findsOneWidget);
+
+      await tester.tap(find.text('Bug'));
+      await tester.pumpAndSettle();
+
+      expect(loader.addCalls.single.tagText, 'Bug');
+      expect(find.byType(TextField), findsNothing);
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('anchors suggestions next to the tag field when opening upward', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(1000, 480));
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+      availableTags: [TaskTag.fromInput('Anchored tag')],
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pumpAndSettle();
+
+      final fieldRect = tester.getRect(find.byType(TextField));
+      final optionRect = tester.getRect(find.text('Anchored tag'));
+      final verticalGap = [
+        (fieldRect.top - optionRect.bottom).abs(),
+        (optionRect.top - fieldRect.bottom).abs(),
+      ].reduce((left, right) => left < right ? left : right);
+
+      expect(verticalGap, lessThan(32));
+      expect((optionRect.left - fieldRect.left).abs(), lessThan(32));
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('arrow and Enter accept a highlighted tag suggestion', (
+    tester,
+  ) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+      availableTags: [
+        TaskTag.fromInput('Debug'),
+        TaskTag.fromInput('Bug'),
+        TaskTag.fromInput('Build'),
+      ],
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'bu');
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(loader.addCalls.single.tagText, 'Build');
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('Escape dismisses suggestions before custom Enter submit', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+      availableTags: [TaskTag.fromInput('Bug'), TaskTag.fromInput('Build')],
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Bu');
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.binding.setSurfaceSize(const Size(1001, 700));
+      await tester.pumpAndSettle();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(loader.addCalls.single.tagText, 'Bu');
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('hides same-level tags but allows manual conflict fallback', (
+    tester,
+  ) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: const Duration(minutes: 90),
+            tags: [TaskTag.fromInput('Bug')],
+          ),
+        ],
+      ),
+      availableTags: [
+        TaskTag.fromInput('Feature'),
+        TaskTag.fromInput('Docs'),
+        TaskTag.fromInput('Bug'),
+      ],
+      preferences: ReportVisualizationPreferences(
+        mode: ReportGroupingMode.task,
+        tagLevels: [
+          ReportTagLevel(['bug', 'feature']),
+        ],
+      ),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Docs'), findsOneWidget);
+      expect(find.text('Feature'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), 'Feature');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(loader.addCalls.single.tagText, 'Feature');
+    } finally {
+      await _disposeWidgetHarness(tester, controller);
+    }
+  });
+
+  testWidgets('keeps tag input open when adding a suggestion fails', (
+    tester,
+  ) async {
+    final loader = _FakeReportLoader(
+      report: ActivityReport(
+        totalDuration: const Duration(minutes: 90),
+        rows: const [
+          ReportRow(
+            taskText: 'Write docs',
+            taskTextNormalized: 'write docs',
+            duration: Duration(minutes: 90),
+          ),
+        ],
+      ),
+      availableTags: [TaskTag.fromInput('Bug')],
+      addError: StateError('tag failed'),
+    );
+    final controller = ReportController(loader);
+    await controller.open();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildWydTheme(),
+          home: ReportView(controller: controller),
+        ),
+      );
+
+      await tester.tap(find.text('Add tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bug'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.textContaining('tag failed'), findsOneWidget);
+
+      loader.addError = null;
+      await tester.tap(find.widgetWithText(InkWell, 'Bug'));
+      await tester.pumpAndSettle();
+
+      expect(loader.addCalls.single.tagText, 'Bug');
       expect(find.byType(TextField), findsNothing);
     } finally {
       await _disposeWidgetHarness(tester, controller);
@@ -411,18 +694,27 @@ ReportRangePreset? _selectedRange(WidgetTester tester) {
 }
 
 final class _FakeReportLoader implements ActivityReportLoader {
-  _FakeReportLoader({this.report, this.error});
+  _FakeReportLoader({
+    this.report,
+    this.error,
+    this.addError,
+    this.availableTags = const [],
+    ReportVisualizationPreferences? preferences,
+  }) : preferences = preferences ?? ReportVisualizationPreferences.defaults;
 
   ActivityReport? report;
   Object? error;
+  Object? addError;
+  final List<TaskTag> availableTags;
+  final ReportVisualizationPreferences preferences;
   final List<_AddTagCall> addCalls = [];
   final List<_RemoveTagCall> removeCalls = [];
 
   @override
   Future<ReportVisualizationData> loadVisualizationData() async {
     return ReportVisualizationData(
-      availableTags: const [],
-      preferences: ReportVisualizationPreferences.defaults,
+      availableTags: availableTags,
+      preferences: preferences,
     );
   }
 
@@ -449,6 +741,10 @@ final class _FakeReportLoader implements ActivityReportLoader {
     required String taskTextNormalized,
     required String tagText,
   }) async {
+    final error = addError;
+    if (error != null) {
+      throw error;
+    }
     addCalls.add(_AddTagCall(taskTextNormalized, tagText));
     return TaskTag.fromInput(tagText);
   }

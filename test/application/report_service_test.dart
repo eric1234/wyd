@@ -457,6 +457,88 @@ void main() {
         expect(controller.state.report!.rows.single.taskText, 'Fix bug');
       },
     );
+
+    test(
+      'tag suggestions rank prefix before substring and preserve recency',
+      () async {
+        final client = _StaticActivityReportLoader(
+          report: _report(DateTime(2026, 1, 2), 'Fix bug'),
+          visualizationLoader: () async => ReportVisualizationData(
+            availableTags: [
+              TaskTag.fromInput('Debug'),
+              TaskTag.fromInput('Bug'),
+              TaskTag.fromInput('Build'),
+              TaskTag.fromInput('Docs'),
+            ],
+            preferences: ReportVisualizationPreferences.defaults,
+          ),
+        );
+        final controller = ReportController(client);
+        addTearDown(controller.dispose);
+        await controller.open();
+
+        expect(controller.tagSuggestions(assignedTags: const [], query: 'BU'), [
+          TaskTag.fromInput('Bug'),
+          TaskTag.fromInput('Build'),
+          TaskTag.fromInput('Debug'),
+        ]);
+        expect(controller.tagSuggestions(assignedTags: const [], query: ''), [
+          TaskTag.fromInput('Debug'),
+          TaskTag.fromInput('Bug'),
+          TaskTag.fromInput('Build'),
+          TaskTag.fromInput('Docs'),
+        ]);
+      },
+    );
+
+    test('tag suggestions exclude assigned and occupied level tags', () async {
+      final preferences = ReportVisualizationPreferences(
+        mode: ReportGroupingMode.task,
+        tagLevels: [
+          ReportTagLevel(['bug', 'feature']),
+          ReportTagLevel(['client', 'internal']),
+        ],
+      );
+      final client = _StaticActivityReportLoader(
+        report: _report(DateTime(2026, 1, 2), 'Fix bug'),
+        visualizationLoader: () async => ReportVisualizationData(
+          availableTags: [
+            TaskTag.fromInput('Feature'),
+            TaskTag.fromInput('Internal'),
+            TaskTag.fromInput('Bug'),
+            TaskTag.fromInput('Client'),
+            TaskTag.fromInput('Docs'),
+          ],
+          preferences: preferences,
+        ),
+      );
+      final controller = ReportController(client);
+      addTearDown(controller.dispose);
+      await controller.open();
+
+      expect(
+        controller.tagSuggestions(
+          assignedTags: [TaskTag.fromInput('Bug')],
+          query: '',
+        ),
+        [
+          TaskTag.fromInput('Internal'),
+          TaskTag.fromInput('Client'),
+          TaskTag.fromInput('Docs'),
+        ],
+      );
+      expect(
+        controller.tagSuggestions(
+          assignedTags: [
+            TaskTag.fromInput('Bug'),
+            TaskTag.fromInput('Feature'),
+            TaskTag.fromInput('Client'),
+          ],
+          query: '',
+        ),
+        [TaskTag.fromInput('Docs')],
+      );
+    });
   });
 }
 

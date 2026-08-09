@@ -199,13 +199,65 @@ final class SqliteTaskTagRepository implements TaskTagRepository {
 
   @override
   Future<List<TaskTag>> allTags() async {
-    final rows = await _executor.rawQuery('''
-SELECT tag_text, tag_text_normalized
-FROM task_tags
-GROUP BY tag_text_normalized
-ORDER BY tag_text_normalized ASC
+    final usageRows = await _executor.rawQuery('''
+SELECT
+  tagged_tasks.task_text_normalized,
+  (
+    SELECT activity_log.occurred_at_utc
+    FROM activity_log
+    WHERE activity_log.task_text_normalized = tagged_tasks.task_text_normalized
+      AND activity_log.event_type IN ('start_task', 'switch_task')
+    ORDER BY activity_log.occurred_at_utc DESC
+    LIMIT 1
+  ) AS last_used_at_utc
+FROM (
+  SELECT DISTINCT task_text_normalized
+  FROM task_tags
+) AS tagged_tasks
 ''');
-    return rows.map(taskTagFromRow).toList();
+    final lastUsedByTask = <String, String?>{
+      for (final row in usageRows)
+        row['task_text_normalized'] as String:
+            row['last_used_at_utc'] as String?,
+    };
+    final rows = (await _executor.query('task_tags')).toList();
+    rows.sort((left, right) {
+      final leftTask = left['task_text_normalized'] as String;
+      final rightTask = right['task_text_normalized'] as String;
+      final leftLastUsed = lastUsedByTask[leftTask];
+      final rightLastUsed = lastUsedByTask[rightTask];
+      if (leftLastUsed == null && rightLastUsed != null) {
+        return 1;
+      }
+      if (leftLastUsed != null && rightLastUsed == null) {
+        return -1;
+      }
+      if (leftLastUsed != null && rightLastUsed != null) {
+        final recency = rightLastUsed.compareTo(leftLastUsed);
+        if (recency != 0) {
+          return recency;
+        }
+      }
+      final normalized = (left['tag_text_normalized'] as String).compareTo(
+        right['tag_text_normalized'] as String,
+      );
+      if (normalized != 0) {
+        return normalized;
+      }
+      final created = (right['created_at_utc'] as String).compareTo(
+        left['created_at_utc'] as String,
+      );
+      if (created != 0) {
+        return created;
+      }
+      return leftTask.compareTo(rightTask);
+    });
+    final tagsByNormalized = <String, TaskTag>{};
+    for (final row in rows) {
+      final tag = taskTagFromRow(row);
+      tagsByNormalized.putIfAbsent(tag.normalized, () => tag);
+    }
+    return tagsByNormalized.values.toList();
   }
 
   @override
